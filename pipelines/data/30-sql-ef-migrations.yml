@@ -1,0 +1,46 @@
+name: sql-ef-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/payments-api/**/Migrations/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: script
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: UseDotNet@2
+      inputs: { version: 8.x }
+    - bash: |
+        dotnet tool install --global dotnet-ef
+        export PATH="$PATH:$HOME/.dotnet/tools"
+        dotnet ef migrations script --idempotent --project apps/payments-api/src/Data \
+          --startup-project apps/payments-api/src/Api -o $(Build.ArtifactStagingDirectory)/migrate.sql
+      displayName: Generate idempotent script
+    - publish: $(Build.ArtifactStagingDirectory)/migrate.sql
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureCLI@2
+        displayName: Apply migration script
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euo pipefail
+            TOKEN=$(az account get-access-token --resource https://database.windows.net/ --query accessToken -o tsv)
+            pip install --quiet pyodbc >/dev/null 2>&1 || true
+            sudo ACCEPT_EULA=Y apt-get install -y -qq mssql-tools18 unixodbc-dev >/dev/null
+            /opt/mssql-tools18/bin/sqlcmd -S $(sqlServer).database.windows.net -d $(sqlDb) -G -P "$TOKEN" \
+              -i "$(Pipeline.Workspace)/drop/migrate.sql" -b

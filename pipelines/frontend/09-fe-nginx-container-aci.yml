@@ -1,0 +1,37 @@
+name: fe-aci-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [feature/*] }
+  paths: { include: [apps/web/**] }
+pr: none
+
+stages:
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: web
+    dockerfile: apps/web/Dockerfile
+    context: apps/web
+
+- template: ../../templates/stages/deploy-env.yml
+  parameters:
+    envName: dev
+    steps:
+    - task: AzureCLI@2
+      displayName: Run on ACI
+      inputs:
+        azureSubscription: sc-azure-dev
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          NAME=$(aciName)-$(Build.BuildId)
+          az container create -g $(rgName) -n "$NAME" \
+            --image $(acrLoginServer)/web:$(Build.BuildId) \
+            --assign-identity $(aciIdentityId) --acr-identity $(aciIdentityId) \
+            --registry-login-server $(acrLoginServer) \
+            --cpu 0.5 --memory 1 --ports 80 --os-type Linux \
+            --dns-name-label "$NAME" --restart-policy Always \
+            --tags env=dev ttl=3d owner="$(Build.RequestedFor)"
+          echo "##vso[task.setvariable variable=previewUrl]http://$NAME.westeurope.azurecontainer.io"
+    - template: ../../templates/steps/smoke-test.yml
+      parameters:
+        url: $(previewUrl)

@@ -1,0 +1,72 @@
+name: be-dotnet-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/payments-api/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: build
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: UseDotNet@2
+      inputs: { version: 8.x }
+    - task: DotNetCoreCLI@2
+      displayName: Test with coverage
+      inputs:
+        command: test
+        projects: apps/payments-api/**/*Tests.csproj
+        arguments: --collect:"XPlat Code Coverage" --logger trx
+    - task: DotNetCoreCLI@2
+      displayName: Publish
+      inputs:
+        command: publish
+        projects: apps/payments-api/src/Api/Api.csproj
+        arguments: -c Release -o $(Build.ArtifactStagingDirectory)/app
+        publishWebProjects: false
+        zipAfterPublish: true
+    - publish: $(Build.ArtifactStagingDirectory)/app
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - ${{ if eq(env, 'dev') }}:
+        - task: AzureWebApp@1
+          displayName: Deploy to dev
+          inputs:
+            azureSubscription: sc-azure-dev
+            appType: webAppLinux
+            appName: $(webAppName)
+            package: $(Pipeline.Workspace)/drop/*.zip
+      - ${{ else }}:
+        - task: AzureWebApp@1
+          displayName: Deploy to staging slot
+          inputs:
+            azureSubscription: sc-azure-${{ env }}
+            appType: webAppLinux
+            appName: $(webAppName)
+            deployToSlotOrASE: true
+            resourceGroupName: $(rgName)
+            slotName: staging
+            package: $(Pipeline.Workspace)/drop/*.zip
+        - template: ../../templates/steps/smoke-test.yml
+          parameters:
+            url: https://$(webAppName)-staging.azurewebsites.net/health
+        - task: AzureAppServiceManage@0
+          displayName: Swap staging into production
+          inputs:
+            azureSubscription: sc-azure-${{ env }}
+            Action: Swap Slots
+            WebAppName: $(webAppName)
+            ResourceGroupName: $(rgName)
+            SourceSlot: staging
+            SwapWithProduction: true

@@ -1,0 +1,18 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: orders-cleanup, namespace: orders }
+spec:
+  schedule: '0 2 * * *'
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: acmeacr.azurecr.io/orders-api:latest
+            command: ['node', 'jobs/cleanup.js']

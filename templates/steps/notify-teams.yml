@@ -1,0 +1,21 @@
+# Post a message to a Teams incoming webhook / Workflows webhook.
+# teamsWebhookUrl comes from the Key Vault-linked variable group (vg-kv-<env>).
+# Payload shape depends on your Teams trigger; adjust the JSON if you use Workflows.
+parameters:
+- name: title
+  type: string
+- name: message
+  type: string
+  default: ''
+- name: condition
+  type: string
+  default: always()
+
+steps:
+- bash: |
+    [ -z "${WEBHOOK:-}" ] && { echo "no webhook configured, skipping"; exit 0; }
+    curl -fsS -H 'Content-Type: application/json' -d "{\"text\": \"**${{ parameters.title }}**\n${{ parameters.message }}\nRun: $(Build.BuildNumber) | $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)\"}" "$WEBHOOK" || true
+  displayName: Notify Teams
+  condition: ${{ parameters.condition }}
+  env:
+    WEBHOOK: $(teamsWebhookUrl)

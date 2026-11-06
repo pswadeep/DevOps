@@ -1,0 +1,67 @@
+# terraform plan | apply | destroy | drift using a workload-identity-federated service connection.
+parameters:
+- name: envName
+  type: string
+- name: action
+  type: string
+  values: [plan, apply, destroy, drift]
+- name: workingDir
+  type: string
+- name: tfVersion
+  type: string
+  default: 1.9.8
+
+steps:
+- bash: |
+    set -euo pipefail
+    mkdir -p "$HOME/bin"
+    curl -fsSL https://releases.hashicorp.com/terraform/${{ parameters.tfVersion }}/terraform_${{ parameters.tfVersion }}_linux_amd64.zip -o /tmp/tf.zip
+    unzip -oq /tmp/tf.zip -d "$HOME/bin"
+    echo "##vso[task.prependpath]$HOME/bin"
+  displayName: Install Terraform ${{ parameters.tfVersion }}
+
+- ${{ if eq(parameters.action, 'apply') }}:
+  - task: DownloadPipelineArtifact@2
+    displayName: Get the reviewed plan
+    inputs:
+      artifact: tfplan-${{ parameters.envName }}
+      path: ${{ parameters.workingDir }}
+
+- task: AzureCLI@2
+  displayName: terraform ${{ parameters.action }} (${{ parameters.envName }})
+  inputs:
+    azureSubscription: sc-azure-${{ parameters.envName }}
+    scriptType: bash
+    scriptLocation: inlineScript
+    addSpnToEnvironment: true
+    workingDirectory: ${{ parameters.workingDir }}
+    inlineScript: |
+      set -euo pipefail
+      export ARM_CLIENT_ID="$servicePrincipalId" ARM_TENANT_ID="$tenantId" ARM_OIDC_TOKEN="$idToken" ARM_USE_OIDC=true
+      export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+      ENV=${{ parameters.envName }}
+      terraform init -input=false \
+        -backend-config="resource_group_name=rg-acme-tfstate-${ENV}" \
+        -backend-config="storage_account_name=stacmetf${ENV}001" \
+        -backend-config="container_name=tfstate" \
+        -backend-config="key=platform.tfstate" \
+        -backend-config="use_oidc=true" -backend-config="use_azuread_auth=true"
+      case "${{ parameters.action }}" in
+        plan)    terraform plan -input=false -lock-timeout=5m -var-file=terraform.tfvars -out=tfplan ;;
+        apply)   terraform apply -input=false -lock-timeout=5m tfplan ;;
+        destroy) terraform destroy -input=false -auto-approve -var-file=terraform.tfvars ;;
+        drift)
+          set +e
+          terraform plan -input=false -lock=false -detailed-exitcode -var-file=terraform.tfvars
+          rc=$?
+          set -e
+          [ $rc -eq 2 ] && echo "##vso[task.logissue type=error]Configuration drift detected in ${ENV}"
+          exit $rc ;;
+      esac
+
+- ${{ if eq(parameters.action, 'plan') }}:
+  - task: PublishPipelineArtifact@1
+    displayName: Publish plan for review
+    inputs:
+      targetPath: ${{ parameters.workingDir }}/tfplan
+      artifact: tfplan-${{ parameters.envName }}

@@ -1,0 +1,9 @@
+replicaCount: 3
+ingress:
+  host: orders.example.com
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+env:
+  APP_ENV: prod

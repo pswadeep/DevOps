@@ -1,0 +1,46 @@
+name: bootstrap-$(Date:yyyyMMdd)$(Rev:.r)
+trigger: none
+pr: none
+
+parameters:
+- name: envName
+  displayName: Environment
+  type: string
+  default: dev
+  values: [dev, stage, prod]
+- name: location
+  type: string
+  default: westeurope
+
+variables:
+- name: rgState
+  value: rg-acme-tfstate-${{ parameters.envName }}
+- name: saState
+  value: stacmetf${{ parameters.envName }}001
+
+stages:
+- stage: bootstrap
+  jobs:
+  - job: state
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: AzureCLI@2
+      displayName: Create state storage (idempotent)
+      inputs:
+        azureSubscription: sc-azure-${{ parameters.envName }}
+        scriptType: bash
+        scriptLocation: inlineScript
+        addSpnToEnvironment: true
+        inlineScript: |
+          set -euo pipefail
+          az group create -n $(rgState) -l ${{ parameters.location }} --tags owner=platform env=${{ parameters.envName }} -o none
+          az storage account create -n $(saState) -g $(rgState) -l ${{ parameters.location }} \
+            --sku Standard_GRS --kind StorageV2 --min-tls-version TLS1_2 \
+            --allow-blob-public-access false --https-only true -o none
+          az storage account blob-service-properties update --account-name $(saState) -g $(rgState) \
+            --enable-versioning true --enable-delete-retention true --delete-retention-days 30 -o none
+          az storage container create --account-name $(saState) -n tfstate -o none
+          az lock create --name keep-tfstate --lock-type CanNotDelete -g $(rgState) -o none
+          SA_ID=$(az storage account show -n $(saState) -g $(rgState) --query id -o tsv)
+          az role assignment create --assignee "$servicePrincipalId" --role "Storage Blob Data Contributor" \
+            --scope "$SA_ID" -o none || echo "Grant 'Storage Blob Data Contributor' on $SA_ID manually"

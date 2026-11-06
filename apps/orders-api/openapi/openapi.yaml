@@ -1,0 +1,7 @@
+openapi: 3.0.3
+info: { title: Orders API, version: '1.0' }
+paths:
+  /health:
+    get: { operationId: health, responses: { '200': { description: ok } } }
+  /orders:
+    get: { operationId: listOrders, responses: { '200': { description: list } } }

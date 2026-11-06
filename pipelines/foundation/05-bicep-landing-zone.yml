@@ -1,0 +1,55 @@
+name: bicep-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [infra/bicep/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- ${{ each env in parameters.environments }}:
+  - stage: whatif_${{ env }}
+    displayName: What-if ${{ env }}
+    ${{ if eq(env, 'dev') }}:
+      dependsOn: []
+    ${{ elseif eq(env, 'stage') }}:
+      dependsOn: [deploy_dev]
+    ${{ else }}:
+      dependsOn: [deploy_stage]
+    jobs:
+    - job: whatif
+      pool: { vmImage: ubuntu-latest }
+      steps:
+      - task: AzureCLI@2
+        displayName: az deployment sub what-if
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            az deployment sub what-if --location westeurope \
+              --template-file infra/bicep/main.bicep --parameters infra/bicep/params.${{ env }}.bicepparam
+  - stage: deploy_${{ env }}
+    displayName: Deploy ${{ env }}
+    dependsOn: whatif_${{ env }}
+    jobs:
+    - deployment: deploy
+      environment: ${{ env }}
+      pool: { vmImage: ubuntu-latest }
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - task: AzureCLI@2
+              displayName: az deployment sub create
+              inputs:
+                azureSubscription: sc-azure-${{ env }}
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: |
+                  az deployment sub create --name landing-$(Build.BuildId) --location westeurope \
+                    --template-file infra/bicep/main.bicep --parameters infra/bicep/params.${{ env }}.bicepparam

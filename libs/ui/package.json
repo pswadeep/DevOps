@@ -1,0 +1,8 @@
+{
+  "name": "@acme/ui",
+  "version": "1.4.0",
+  "scripts": {
+    "build": "echo built",
+    "test": "echo ok"
+  }
+}

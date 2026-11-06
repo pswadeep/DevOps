@@ -1,0 +1,13 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: { name: orders-stage, namespace: argocd }
+spec:
+  project: default
+  source:
+    repoURL: https://dev.azure.com/acme/platform/_git/acme-devops-platform
+    targetRevision: main
+    path: apps/orders/overlays/stage
+  destination: { server: https://kubernetes.default.svc, namespace: orders-stage }
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]

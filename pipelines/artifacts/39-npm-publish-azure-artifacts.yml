@@ -1,0 +1,31 @@
+name: npm-pub-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main, feature/*] }
+  paths: { include: [libs/ui/**] }
+pr: none
+
+variables:
+- group: vg-shared
+- name: baseVersion
+  value: 1.4.0
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- task: NodeTool@0
+  inputs: { versionSpec: '20.x' }
+- task: npmAuthenticate@0
+  inputs:
+    workingFile: libs/ui/.npmrc
+- bash: |
+    set -euo pipefail
+    cd libs/ui
+    npm ci && npm test -- --ci && npm run build
+    if [ "$(Build.SourceBranch)" = "refs/heads/main" ]; then
+      VERSION="$(baseVersion).$(Build.BuildId)"
+    else
+      VERSION="$(baseVersion)-pr.$(Build.BuildId)"
+    fi
+    npm version "$VERSION" --no-git-tag-version
+    npm publish
+  displayName: Test, version, publish

@@ -1,0 +1,52 @@
+name: be-java-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/inventory-service/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: test
+  jobs:
+  - job: maven
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: Maven@4
+      inputs:
+        mavenPomFile: apps/inventory-service/pom.xml
+        goals: verify
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        codeCoverageToolOption: JaCoCo
+        javaHomeOption: JDKVersion
+        jdkVersionOption: '1.17'
+
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: inventory-service
+    dockerfile: apps/inventory-service/Dockerfile
+    context: apps/inventory-service
+    stageName: build
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - template: ../../templates/steps/aks-run.yml
+        parameters:
+          serviceConnection: sc-azure-${{ env }}
+          resourceGroup: $(rgName)
+          cluster: $(aksName)
+          displayName: helm upgrade --atomic (${{ env }})
+          script: |
+            helm upgrade --install inventory k8s/helm/orders-api \
+              --namespace inventory --create-namespace \
+              -f k8s/helm/orders-api/values-${{ env }}.yaml \
+              --set image.repository=$(acrLoginServer)/inventory-service --set image.tag=$(Build.BuildId) \
+              --atomic --wait --timeout 5m
+            kubectl -n inventory rollout status deploy/inventory --timeout=120s

@@ -1,0 +1,50 @@
+name: fe-angular-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/portal/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: build
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: NodeTool@0
+      inputs: { versionSpec: '20.x' }
+    - bash: |
+        npm ci
+        npx ng test --watch=false --browsers=ChromeHeadless
+        npx ng build --configuration production
+      workingDirectory: apps/portal
+      displayName: Test and build
+    - task: ArchiveFiles@2
+      inputs:
+        rootFolderOrFile: apps/portal/dist/portal/browser
+        includeRootFolder: false
+        archiveFile: $(Build.ArtifactStagingDirectory)/portal.zip
+    - publish: $(Build.ArtifactStagingDirectory)/portal.zip
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureWebApp@1
+        displayName: Deploy zip to $(webAppName)
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          appType: webAppLinux
+          appName: $(webAppName)
+          package: $(Pipeline.Workspace)/drop/portal.zip
+          runtimeStack: NODE|20-lts
+          startUpCommand: pm2 serve /home/site/wwwroot --no-daemon --spa
+      - template: ../../templates/steps/smoke-test.yml
+        parameters:
+          url: https://$(webAppName).azurewebsites.net/

@@ -1,0 +1,39 @@
+name: fe-swa-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/web/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: build
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: NodeTool@0
+      inputs: { versionSpec: '20.x' }
+    - bash: npm ci && npm test -- --ci --watchAll=false && npm run build
+      workingDirectory: apps/web
+      displayName: Install, test, build
+    - publish: apps/web/build
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - bash: |
+          npx --yes @azure/static-web-apps-cli@2 deploy "$(Pipeline.Workspace)/drop" \
+            --deployment-token "$SWA_TOKEN" --env production
+        displayName: Deploy to Static Web App (${{ env }})
+        env:
+          SWA_TOKEN: $(swaDeployToken)
+      - template: ../../templates/steps/smoke-test.yml
+        parameters:
+          url: $(appUrl)

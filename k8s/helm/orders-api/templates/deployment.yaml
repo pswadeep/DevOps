@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels: {{- include "app.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.rollout.maxUnavailable }}
+      maxSurge: {{ .Values.rollout.maxSurge }}
+  selector:
+    matchLabels: {{- include "app.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "app.selector" . | nindent 8 }}
+    spec:
+      containers:
+      - name: app
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports: [{ containerPort: {{ .Values.containerPort }} }]
+        env:
+        {{- range $k, $v := .Values.env }}
+        - { name: {{ $k }}, value: {{ $v | quote }} }
+        {{- end }}
+        readinessProbe: { httpGet: { path: /health, port: {{ .Values.containerPort }} }, periodSeconds: 5 }
+        livenessProbe:  { httpGet: { path: /health, port: {{ .Values.containerPort }} }, initialDelaySeconds: 10 }
+        resources: {{- toYaml .Values.resources | nindent 10 }}

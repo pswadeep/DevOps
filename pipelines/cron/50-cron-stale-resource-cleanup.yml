@@ -1,0 +1,33 @@
+name: stale-cleanup-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 21 * * *'
+  displayName: Nightly cleanup
+  branches: { include: [main] }
+  always: true
+
+parameters:
+- name: dryRun
+  type: boolean
+  default: true
+
+jobs:
+- job: cleanup
+  pool: { vmImage: ubuntu-latest }
+  steps:
+  - task: AzureCLI@2
+    displayName: Remove expired ephemeral groups, report orphans
+    inputs:
+      azureSubscription: sc-azure-dev
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        set -euo pipefail
+        TODAY=$(date -u +%Y-%m-%d)
+        for rg in $(az group list --tag ephemeral=true --query "[?tags.expires<'$TODAY'].name" -o tsv); do
+          echo "expired: $rg"
+          [ "${{ parameters.dryRun }}" = "False" ] && az group delete -n "$rg" --yes --no-wait
+        done
+        echo "Unattached disks:"; az disk list --query "[?managedBy==null].{n:name,rg:resourceGroup,gb:diskSizeGb}" -o table
+        echo "Unassociated public IPs:"; az network public-ip list --query "[?ipConfiguration==null].{n:name,rg:resourceGroup}" -o table

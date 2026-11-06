@@ -1,0 +1,32 @@
+{
+  "rules": [
+    {
+      "enabled": true,
+      "name": "tier-and-expire-logs",
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": [
+            "blockBlob"
+          ],
+          "prefixMatch": [
+            "logs/"
+          ]
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": {
+              "daysAfterModificationGreaterThan": 30
+            },
+            "tierToArchive": {
+              "daysAfterModificationGreaterThan": 90
+            },
+            "delete": {
+              "daysAfterModificationGreaterThan": 365
+            }
+          }
+        }
+      }
+    }
+  ]
+}

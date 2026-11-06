@@ -1,0 +1,6 @@
+namespace: orders-prod
+resources: [../../base]
+replicas:
+- { name: orders, count: 3 }
+images:
+- { name: acmeacr.azurecr.io/orders-api, newTag: latest }

@@ -1,0 +1,32 @@
+name: drift-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 1 * * *'
+  displayName: Nightly drift check
+  branches: { include: [main] }
+  always: true
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+jobs:
+- ${{ each env in parameters.environments }}:
+  - job: drift_${{ env }}
+    pool: { vmImage: ubuntu-latest }
+    variables:
+    - group: vg-kv-${{ env }}
+    steps:
+    - checkout: self
+    - template: ../../templates/steps/terraform.yml
+      parameters:
+        envName: ${{ env }}
+        action: drift
+        workingDir: infra/terraform/envs/${{ env }}
+    - template: ../../templates/steps/notify-teams.yml
+      parameters:
+        title: Terraform drift in ${{ env }}
+        message: Plan shows changes that are not in Git.
+        condition: failed()

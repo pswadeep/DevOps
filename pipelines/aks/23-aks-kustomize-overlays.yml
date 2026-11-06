@@ -1,0 +1,40 @@
+name: aks-kustomize-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [k8s/kustomize/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: validate
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - bash: |
+        set -euo pipefail
+        curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+        for e in dev stage prod; do
+          kubectl kustomize k8s/kustomize/overlays/$e | ./kubeconform -strict -summary -ignore-missing-schemas
+        done
+      displayName: Render and validate every overlay
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - template: ../../templates/steps/aks-run.yml
+        parameters:
+          serviceConnection: sc-azure-${{ env }}
+          resourceGroup: $(rgName)
+          cluster: $(aksName)
+          displayName: kubectl diff and apply (${{ env }})
+          script: |
+            kubectl diff -k k8s/kustomize/overlays/${{ env }} || true
+            kubectl apply -k k8s/kustomize/overlays/${{ env }} --prune -l app.kubernetes.io/part-of=orders
+            kubectl -n orders rollout status deploy/orders --timeout=180s

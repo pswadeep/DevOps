@@ -1,0 +1,51 @@
+# Build once, scan, push to the shared ACR. The tag is $(Build.BuildId) and is promoted unchanged to every environment.
+parameters:
+- name: repository
+  type: string
+- name: dockerfile
+  type: string
+  default: Dockerfile
+- name: context
+  type: string
+  default: .
+- name: buildArgs
+  type: string
+  default: ''
+- name: stageName
+  type: string
+  default: build
+- name: scanExitCode
+  type: string
+  default: '1'   # 1 = fail the build on HIGH/CRITICAL findings, 0 = report only
+
+stages:
+- stage: ${{ parameters.stageName }}
+  displayName: Build and push ${{ parameters.repository }}
+  variables:
+  - group: vg-shared
+  jobs:
+  - job: image
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: Docker@2
+      displayName: Build image
+      inputs:
+        command: build
+        containerRegistry: sc-acr-shared
+        repository: ${{ parameters.repository }}
+        Dockerfile: ${{ parameters.dockerfile }}
+        buildContext: ${{ parameters.context }}
+        tags: $(Build.BuildId)
+        arguments: ${{ parameters.buildArgs }}
+    - bash: |
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.58.0 image \
+          --severity HIGH,CRITICAL --ignore-unfixed --exit-code ${{ parameters.scanExitCode }} \
+          $(acrLoginServer)/${{ parameters.repository }}:$(Build.BuildId)
+      displayName: Trivy image scan
+    - task: Docker@2
+      displayName: Push image
+      inputs:
+        command: push
+        containerRegistry: sc-acr-shared
+        repository: ${{ parameters.repository }}
+        tags: $(Build.BuildId)

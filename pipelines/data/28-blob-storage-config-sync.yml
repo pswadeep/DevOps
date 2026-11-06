@@ -1,0 +1,53 @@
+name: blob-config-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [infra/storage/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+- name: syncFrom
+  displayName: Optional source container URL to sync into 'data' (dev only)
+  type: string
+  default: ''
+
+stages:
+- stage: build
+  jobs:
+  - job: validate
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - bash: python3 -m json.tool infra/storage/lifecycle.json > /dev/null
+      displayName: Validate lifecycle policy JSON
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureCLI@2
+        displayName: Apply storage settings
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euo pipefail
+            az storage account blob-service-properties update -n $(storageAccount) -g $(rgName) \
+              --enable-versioning true --enable-delete-retention true --delete-retention-days 14 \
+              --enable-container-delete-retention true --container-delete-retention-days 14
+            az storage container create --account-name $(storageAccount) -n data --auth-mode login
+            az storage account management-policy create --account-name $(storageAccount) -g $(rgName) \
+              --policy @infra/storage/lifecycle.json
+      - ${{ if and(eq(env, 'dev'), ne(parameters.syncFrom, '')) }}:
+        - task: AzureCLI@2
+          displayName: AzCopy sync
+          inputs:
+            azureSubscription: sc-azure-dev
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              export AZCOPY_AUTO_LOGIN_TYPE=AZCLI
+              azcopy sync "${{ parameters.syncFrom }}" "https://$(storageAccount).blob.core.windows.net/data" --recursive --delete-destination=false

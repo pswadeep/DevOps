@@ -1,0 +1,43 @@
+name: policy-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [infra/policy/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: validate
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - bash: for f in infra/policy/*.json; do python3 -m json.tool "$f" >/dev/null || exit 1; done
+      displayName: Validate policy JSON
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureCLI@2
+        displayName: Definitions, initiative and assignment
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euo pipefail
+            MODE=$([ "${{ env }}" = "dev" ] && echo DoNotEnforce || echo Default)
+            az policy definition create -n deny-public-blob --rules infra/policy/deny-public-blob.rules.json \
+              --params infra/policy/deny-public-blob.params.json --mode All --display-name "Deny public blob access"
+            az policy set-definition create -n acme-baseline --definitions infra/policy/baseline-initiative.json \
+              --params infra/policy/baseline-initiative.params.json --display-name "ACME baseline"
+            az policy assignment create -n acme-baseline-${{ env }} --policy-set-definition acme-baseline \
+              --enforcement-mode $MODE --params '{"allowedLocations":{"value":["westeurope","northeurope"]}}'
+            az policy state summarize --query "results.{nonCompliantResources:nonCompliantResources,nonCompliantPolicies:nonCompliantPolicies}" -o table
+            az security pricing create -n StorageAccounts --tier standard -o none
+            az security pricing create -n KeyVaults --tier standard -o none

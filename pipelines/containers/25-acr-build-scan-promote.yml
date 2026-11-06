@@ -1,0 +1,54 @@
+name: acr-promote-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/orders-api/**] }
+pr: none
+
+variables:
+- group: vg-shared
+
+stages:
+- stage: build
+  jobs:
+  - job: acr
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: AzureCLI@2
+      displayName: ACR Tasks build
+      inputs:
+        azureSubscription: sc-azure-dev
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az acr build -r $(acrName) -t orders-api:$(Build.BuildId) -f apps/orders-api/Dockerfile apps/orders-api
+    - task: AzureCLI@2
+      displayName: Trivy scan from the registry
+      inputs:
+        azureSubscription: sc-azure-dev
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          TOKEN=$(az acr login -n $(acrName) --expose-token --query accessToken -o tsv)
+          docker run --rm -e TRIVY_USERNAME=00000000-0000-0000-0000-000000000000 -e TRIVY_PASSWORD="$TOKEN" \
+            aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            $(acrLoginServer)/orders-api:$(Build.BuildId)
+
+- stage: promote
+  dependsOn: build
+  jobs:
+  - deployment: import
+    environment: prod
+    pool: { vmImage: ubuntu-latest }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            displayName: az acr import to prod registry
+            inputs:
+              azureSubscription: sc-azure-prod
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az acr import -n $(acrNameProd) --source $(acrLoginServer)/orders-api:$(Build.BuildId) \
+                  --image orders-api:$(Build.BuildId) --force

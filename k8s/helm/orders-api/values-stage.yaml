@@ -1,0 +1,9 @@
+replicaCount: 2
+ingress:
+  host: orders.stage.example.com
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+env:
+  APP_ENV: stage

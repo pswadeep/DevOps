@@ -1,0 +1,27 @@
+name: sec-gate-$(Build.BuildId)
+trigger: none
+pr: none
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- checkout: self
+- bash: |
+    pip install --quiet semgrep==1.*
+    semgrep scan --config p/owasp-top-ten --config p/secrets --sarif --output $(Build.ArtifactStagingDirectory)/semgrep.sarif --error --severity ERROR
+  displayName: Semgrep SAST
+- bash: |
+    cd apps/orders-api && npm ci --ignore-scripts
+    npm audit --audit-level=high
+  displayName: npm audit (high and above)
+  condition: always()
+- bash: |
+    for p in $(find apps -name '*.csproj'); do
+      dotnet list "$p" package --vulnerable --include-transitive | tee -a $(Build.ArtifactStagingDirectory)/dotnet-vuln.txt
+    done
+    ! grep -E 'High|Critical' $(Build.ArtifactStagingDirectory)/dotnet-vuln.txt
+  displayName: .NET vulnerable packages
+  condition: always()
+- publish: $(Build.ArtifactStagingDirectory)
+  artifact: security-reports
+  condition: always()

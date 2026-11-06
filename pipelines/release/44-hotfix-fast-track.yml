@@ -1,0 +1,40 @@
+name: hotfix-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [hotfix/*] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: build
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: NodeTool@0
+      inputs: { versionSpec: '20.x' }
+    - bash: cd apps/orders-api && npm ci && npm test -- --ci && npm audit --audit-level=critical
+      displayName: Unit tests and critical audit only
+    - bash: cd apps/orders-api && zip -qr $(Build.ArtifactStagingDirectory)/orders-api.zip . -x 'node_modules/.cache/*'
+    - publish: $(Build.ArtifactStagingDirectory)/orders-api.zip
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      ${{ if eq(env, 'stage') }}:
+        buildStage: build
+      steps:
+      - task: AzureWebApp@1
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          appType: webAppLinux
+          appName: $(webAppName)
+          package: $(Pipeline.Workspace)/drop/orders-api.zip
+      - template: ../../templates/steps/smoke-test.yml
+        parameters:
+          url: $(apiUrl)/health

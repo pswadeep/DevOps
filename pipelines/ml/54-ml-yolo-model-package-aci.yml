@@ -1,0 +1,52 @@
+name: yolo-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [ml/yolo/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: validate
+  jobs:
+  - job: eval
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: UsePythonVersion@0
+      inputs: { versionSpec: '3.11' }
+    - bash: |
+        cd ml/yolo && pip install -r requirements.txt
+        python evaluate.py --weights weights/best.pt --data samples --min-map 0.80
+      displayName: Accuracy gate (mAP at least 0.80)
+
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: yolo-inference
+    dockerfile: ml/yolo/Dockerfile
+    context: ml/yolo
+    stageName: build
+    scanExitCode: '0'
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureCLI@2
+        displayName: Deploy inference container to ACI
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euo pipefail
+            az container create -g $(rgName) -n yolo-${{ env }} --image $(acrLoginServer)/yolo-inference:$(Build.BuildId) \
+              --assign-identity $(aciIdentityId) --acr-identity $(aciIdentityId) --registry-login-server $(acrLoginServer) \
+              --cpu 2 --memory 4 --ports 8000 --ip-address Public --dns-name-label yolo-acme-${{ env }} \
+              --restart-policy OnFailure --tags env=${{ env }} shutdown=true
+      - template: ../../templates/steps/smoke-test.yml
+        parameters:
+          url: http://yolo-acme-${{ env }}.westeurope.azurecontainer.io:8000/health

@@ -1,0 +1,77 @@
+name: aks-canary-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/pricing/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [stage, prod]
+
+stages:
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: pricing
+    dockerfile: apps/pricing/Dockerfile
+    context: apps/pricing
+
+- ${{ each env in parameters.environments }}:
+  - stage: canary_${{ env }}
+    displayName: Canary ${{ env }}
+    ${{ if eq(env, 'stage') }}:
+      dependsOn: build
+    ${{ else }}:
+      dependsOn: promote_stage
+    variables:
+    - group: vg-shared
+    - group: vg-${{ env }}
+    jobs:
+    - deployment: canary
+      environment: ${{ env }}
+      pool: { vmImage: ubuntu-latest }
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - template: ../../templates/steps/aks-run.yml
+              parameters:
+                serviceConnection: sc-azure-${{ env }}
+                resourceGroup: $(rgName)
+                cluster: $(aksName)
+                displayName: Canary 10 percent then 50 percent
+                script: |
+                  IMG="--set image.repository=$(acrLoginServer)/pricing --set image.tag=$(Build.BuildId)"
+                  for W in 10 50; do
+                    helm upgrade --install pricing-canary k8s/helm/orders-api -n pricing $IMG \
+                      -f k8s/helm/orders-api/values-${{ env }}.yaml \
+                      --set ingress.canary.enabled=true --set ingress.canary.weight=$W --wait --timeout 5m
+                    sleep 300
+                    if ! ./scripts/canary-check.sh pricing-canary 0.01; then
+                      helm uninstall pricing-canary -n pricing
+                      echo "##vso[task.logissue type=error]Canary failed at $W percent"; exit 1
+                    fi
+                  done
+  - stage: promote_${{ env }}
+    displayName: Promote ${{ env }}
+    dependsOn: canary_${{ env }}
+    variables:
+    - group: vg-shared
+    - group: vg-${{ env }}
+    jobs:
+    - job: promote
+      pool: { vmImage: ubuntu-latest }
+      steps:
+      - checkout: self
+      - template: ../../templates/steps/aks-run.yml
+        parameters:
+          serviceConnection: sc-azure-${{ env }}
+          resourceGroup: $(rgName)
+          cluster: $(aksName)
+          displayName: Promote to stable, remove canary
+          script: |
+            helm upgrade --install pricing k8s/helm/orders-api -n pricing \
+              -f k8s/helm/orders-api/values-${{ env }}.yaml \
+              --set image.repository=$(acrLoginServer)/pricing --set image.tag=$(Build.BuildId) --atomic --wait
+            helm uninstall pricing-canary -n pricing

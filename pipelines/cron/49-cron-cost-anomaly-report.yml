@@ -1,0 +1,42 @@
+name: cost-report-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 4 * * 1'
+  displayName: Weekly cost report
+  branches: { include: [main] }
+  always: true
+
+parameters:
+- name: thresholdPercent
+  type: number
+  default: 25
+
+jobs:
+- job: report
+  pool: { vmImage: ubuntu-latest }
+  variables:
+  - group: vg-kv-prod
+  steps:
+  - task: AzureCLI@2
+    displayName: Month-to-date cost by resource group
+    inputs:
+      azureSubscription: sc-azure-prod
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        set -euo pipefail
+        az extension add -n costmanagement -y >/dev/null 2>&1 || true
+        SUB=$(az account show --query id -o tsv)
+        START=$(date -u +%Y-%m-01); END=$(date -u +%Y-%m-%d)
+        az costmanagement query --type ActualCost --timeframe Custom \
+          --time-period from=${START}T00:00:00Z to=${END}T23:59:59Z \
+          --dataset-aggregation '{"totalCost":{"name":"Cost","function":"Sum"}}' \
+          --dataset-grouping name=ResourceGroupName type=Dimension \
+          --scope "/subscriptions/$SUB" -o table | tee $(Build.ArtifactStagingDirectory)/cost.txt
+  - publish: $(Build.ArtifactStagingDirectory)/cost.txt
+    artifact: cost-report
+  - template: ../../templates/steps/notify-teams.yml
+    parameters:
+      title: Weekly Azure cost report
+      message: Threshold ${{ parameters.thresholdPercent }} percent, see the attached cost-report artifact.

@@ -1,0 +1,45 @@
+name: messaging-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [infra/messaging/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: lint
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - bash: az bicep build --file infra/messaging/main.bicep --stdout > /dev/null
+      displayName: Bicep build and lint
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureResourceManagerTemplateDeployment@3
+        displayName: What-if
+        inputs:
+          azureResourceManagerConnection: sc-azure-${{ env }}
+          subscriptionId: $(subscriptionId)
+          resourceGroupName: $(rgName)
+          location: westeurope
+          deploymentMode: Validation
+          csmFile: infra/messaging/main.bicep
+          csmParametersFile: infra/messaging/params.${{ env }}.json
+      - task: AzureResourceManagerTemplateDeployment@3
+        displayName: Deploy messaging
+        inputs:
+          azureResourceManagerConnection: sc-azure-${{ env }}
+          subscriptionId: $(subscriptionId)
+          resourceGroupName: $(rgName)
+          location: westeurope
+          deploymentMode: Incremental
+          csmFile: infra/messaging/main.bicep
+          csmParametersFile: infra/messaging/params.${{ env }}.json

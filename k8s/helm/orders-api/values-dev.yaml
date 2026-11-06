@@ -1,0 +1,9 @@
+replicaCount: 1
+ingress:
+  host: orders.dev.example.com
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+env:
+  APP_ENV: dev

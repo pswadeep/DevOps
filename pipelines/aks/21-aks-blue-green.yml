@@ -1,0 +1,51 @@
+name: aks-bluegreen-$(Date:yyyyMMdd)$(Rev:.r)
+trigger: none
+pr: none
+
+parameters:
+- name: environment
+  type: string
+  default: stage
+  values: [stage, prod]
+- name: imageTag
+  displayName: Image tag (Build ID) to release
+  type: string
+- name: switchTraffic
+  type: boolean
+  default: false
+
+variables:
+- group: vg-shared
+- group: vg-${{ parameters.environment }}
+
+stages:
+- stage: bluegreen
+  jobs:
+  - deployment: release
+    environment: ${{ parameters.environment }}
+    pool: { vmImage: ubuntu-latest }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - template: ../../templates/steps/aks-run.yml
+            parameters:
+              serviceConnection: sc-azure-${{ parameters.environment }}
+              resourceGroup: $(rgName)
+              cluster: $(aksName)
+              displayName: Deploy idle colour, test, switch
+              script: |
+                kubectl apply -f k8s/bluegreen/service.yaml -n billing
+                LIVE=$(kubectl -n billing get svc billing -o jsonpath='{.spec.selector.color}')
+                NEW=$([ "$LIVE" = "blue" ] && echo green || echo blue)
+                echo "live=$LIVE new=$NEW"
+                helm upgrade --install billing-$NEW k8s/helm/orders-api -n billing \
+                  --set color=$NEW --set service.enabled=false \
+                  --set image.repository=$(acrLoginServer)/billing --set image.tag=${{ parameters.imageTag }} --wait
+                kubectl -n billing run bg-test --rm -i --restart=Never --image=curlimages/curl -- \
+                  curl -fsS http://billing-$NEW:8080/healthz || { echo "idle colour unhealthy"; exit 1; }
+                if [ "${{ parameters.switchTraffic }}" = "True" ]; then
+                  kubectl -n billing patch svc billing -p "{\"spec\":{\"selector\":{\"app.kubernetes.io/name\":\"orders-api\",\"color\":\"$NEW\"}}}"
+                  echo "Traffic now on $NEW. Rollback: patch the selector back to $LIVE"
+                fi

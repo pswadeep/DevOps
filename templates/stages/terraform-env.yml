@@ -1,0 +1,43 @@
+# One environment = a plan stage and an apply stage (apply waits on the Environment's approvals).
+parameters:
+- name: envName
+  type: string
+- name: dependsOn
+  type: object
+  default: []
+- name: workingDir
+  type: string
+  default: infra/terraform/envs
+
+stages:
+- stage: plan_${{ parameters.envName }}
+  displayName: Plan ${{ parameters.envName }}
+  dependsOn: ${{ parameters.dependsOn }}
+  jobs:
+  - job: plan
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - checkout: self
+    - template: ../steps/terraform.yml
+      parameters:
+        envName: ${{ parameters.envName }}
+        action: plan
+        workingDir: ${{ parameters.workingDir }}/${{ parameters.envName }}
+
+- stage: apply_${{ parameters.envName }}
+  displayName: Apply ${{ parameters.envName }}
+  dependsOn: plan_${{ parameters.envName }}
+  jobs:
+  - deployment: apply
+    environment: ${{ parameters.envName }}
+    pool: { vmImage: ubuntu-latest }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - template: ../steps/terraform.yml
+            parameters:
+              envName: ${{ parameters.envName }}
+              action: apply
+              workingDir: ${{ parameters.workingDir }}/${{ parameters.envName }}

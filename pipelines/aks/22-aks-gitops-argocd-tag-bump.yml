@@ -1,0 +1,54 @@
+name: gitops-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/orders-api/**] }
+pr: none
+
+resources:
+  repositories:
+  - repository: gitops
+    type: git
+    name: platform/acme-gitops
+    ref: main
+
+stages:
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: orders-api
+    dockerfile: apps/orders-api/Dockerfile
+    context: apps/orders-api
+
+- stage: bump
+  dependsOn: build
+  variables:
+  - group: vg-shared
+  jobs:
+  - job: commit
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - checkout: gitops
+      persistCredentials: true
+    - bash: |
+        set -euo pipefail
+        cd apps/orders/overlays/dev
+        curl -fsSL https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+        ./kustomize edit set image orders-api=$(acrLoginServer)/orders-api:$(Build.BuildId)
+        rm kustomize
+        git config user.email "ci@acme.example" && git config user.name "acme-ci"
+        git add . && git commit -m "orders-api dev -> $(Build.BuildId)" && git push origin HEAD:main
+      displayName: Commit new tag to dev overlay
+    - bash: |
+        set -euo pipefail
+        BR=promote/orders-$(Build.BuildId)
+        git checkout -b "$BR" origin/main
+        cd apps/orders/overlays/stage
+        curl -fsSL https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+        ./kustomize edit set image orders-api=$(acrLoginServer)/orders-api:$(Build.BuildId)
+        rm kustomize
+        git add . && git commit -m "orders-api stage -> $(Build.BuildId)" && git push origin "$BR"
+        az extension add -n azure-devops -y --only-show-errors
+        az repos pr create --repository acme-gitops --source-branch "$BR" --target-branch main \
+          --title "Promote orders-api $(Build.BuildId) to stage" --auto-complete false
+      displayName: Open promotion PR for stage
+      env:
+        AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)

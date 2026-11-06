@@ -1,0 +1,32 @@
+name: k6-$(Date:yyyyMMdd)$(Rev:.r)
+trigger: none
+pr: none
+schedules:
+- cron: '0 22 * * 3'
+  displayName: Weekly load test
+  branches: { include: [main] }
+  always: true
+
+parameters:
+- name: vus
+  type: number
+  default: 50
+- name: duration
+  type: string
+  default: 5m
+
+variables:
+- group: vg-stage
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- checkout: self
+- bash: |
+    docker run --rm -v "$PWD/tests/k6:/scripts" -v "$(Build.ArtifactStagingDirectory):/out" \
+      -e BASE_URL=$(apiUrl) grafana/k6:0.54.0 run --vus ${{ parameters.vus }} --duration ${{ parameters.duration }} \
+      --summary-export=/out/summary.json /scripts/orders.js
+  displayName: Run k6
+- publish: $(Build.ArtifactStagingDirectory)/summary.json
+  artifact: k6-summary
+  condition: always()

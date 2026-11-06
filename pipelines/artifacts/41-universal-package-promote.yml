@@ -1,0 +1,65 @@
+name: upack-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/portal/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+variables:
+- group: vg-shared
+- name: pkgVersion
+  value: 2.1.$(Build.BuildId)
+
+stages:
+- stage: build
+  jobs:
+  - job: pack
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - bash: |
+        cd apps/portal && npm ci && npm run build
+        mkdir -p $(Build.ArtifactStagingDirectory)/pkg && cp -r dist/* $(Build.ArtifactStagingDirectory)/pkg/
+    - task: UniversalPackages@0
+      displayName: Publish universal package
+      inputs:
+        command: publish
+        publishDirectory: $(Build.ArtifactStagingDirectory)/pkg
+        vstsFeedPublish: platform/acme-feed
+        vstsFeedPackagePublish: portal-bundle
+        versionOption: custom
+        versionPublish: $(pkgVersion)
+
+- ${{ each env in parameters.environments }}:
+  - stage: promote_${{ env }}
+    ${{ if eq(env, 'dev') }}:
+      dependsOn: build
+    ${{ elseif eq(env, 'stage') }}:
+      dependsOn: promote_dev
+    ${{ else }}:
+      dependsOn: promote_stage
+    jobs:
+    - deployment: promote
+      environment: ${{ env }}
+      pool: { vmImage: ubuntu-latest }
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - task: UniversalPackages@0
+              displayName: Download package version $(pkgVersion)
+              inputs:
+                command: download
+                vstsFeed: platform/acme-feed
+                vstsFeedPackage: portal-bundle
+                vstsPackageVersion: $(pkgVersion)
+                downloadDirectory: $(Pipeline.Workspace)/pkg
+            - bash: |
+                VIEW=$([ "${{ env }}" = "prod" ] && echo Release || echo Prerelease)
+                curl -fsS -X PATCH -H "Authorization: Bearer $(System.AccessToken)" -H "Content-Type: application/json" \
+                  -d "{\"views\":{\"op\":\"add\",\"path\":\"/views/-\",\"value\":\"$VIEW\"}}" \
+                  "https://pkgs.dev.azure.com/$(adoOrg)/platform/_apis/packaging/feeds/acme-feed/upack/packages/portal-bundle/versions/$(pkgVersion)?api-version=7.1-preview.1"
+              displayName: Promote package to view

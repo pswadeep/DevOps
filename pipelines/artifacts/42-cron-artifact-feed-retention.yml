@@ -1,0 +1,37 @@
+name: feed-retention-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 20 * * 6'
+  displayName: Weekly feed retention
+  branches: { include: [main] }
+  always: true
+
+parameters:
+- name: dryRunFlag
+  displayName: Extra flag ('--dry-run' to only report)
+  type: string
+  default: '--dry-run'
+- name: keepLast
+  type: number
+  default: 20
+- name: olderThanDays
+  type: number
+  default: 60
+
+variables:
+- group: vg-shared
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- checkout: self
+- task: UsePythonVersion@0
+  inputs: { versionSpec: '3.11' }
+- bash: |
+    python3 scripts/feed_retention.py --org $(adoOrg) --project platform --feed acme-feed \
+      --keep ${{ parameters.keepLast }} --older-than-days ${{ parameters.olderThanDays }} \
+      ${{ parameters.dryRunFlag }}
+  displayName: Prune prerelease versions
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)

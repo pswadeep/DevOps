@@ -1,0 +1,49 @@
+# One deployment stage for one environment (dev | stage | prod).
+#  - pulls variable groups vg-<env> (plain) and vg-kv-<env> (Key Vault backed)
+#  - deploys through the Azure DevOps Environment <env> (approvals / checks live there)
+#  - buildStage '' means no build stage to wait for (dev stage starts the pipeline)
+#  - runs the steps you pass in; pipeline artifacts are downloaded automatically
+parameters:
+- name: envName
+  type: string
+- name: buildStage
+  type: string
+  default: build
+- name: condition
+  type: string
+  default: succeeded()
+- name: pool
+  type: object
+  default:
+    vmImage: ubuntu-latest
+- name: steps
+  type: stepList
+  default: []
+
+stages:
+- stage: deploy_${{ parameters.envName }}
+  displayName: Deploy ${{ parameters.envName }}
+  ${{ if and(eq(parameters.envName, 'dev'), ne(parameters.buildStage, '')) }}:
+    dependsOn: ${{ parameters.buildStage }}
+  ${{ elseif eq(parameters.envName, 'dev') }}:
+    dependsOn: []
+  ${{ elseif eq(parameters.envName, 'stage') }}:
+    dependsOn: deploy_dev
+  ${{ else }}:
+    dependsOn: deploy_stage
+  condition: ${{ parameters.condition }}
+  variables:
+  - group: vg-shared
+  - group: vg-${{ parameters.envName }}
+  - group: vg-kv-${{ parameters.envName }}
+  jobs:
+  - deployment: deploy
+    displayName: Deploy to ${{ parameters.envName }}
+    environment: ${{ parameters.envName }}
+    pool: ${{ parameters.pool }}
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - ${{ parameters.steps }}

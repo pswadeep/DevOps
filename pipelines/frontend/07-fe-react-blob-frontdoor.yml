@@ -1,0 +1,48 @@
+name: fe-blob-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/web/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: build
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: NodeTool@0
+      inputs: { versionSpec: '20.x' }
+    - bash: npm ci && npm run build
+      workingDirectory: apps/web
+    - publish: apps/web/build
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureCLI@2
+        displayName: Upload to $web and purge Front Door
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euo pipefail
+            SRC="$(Pipeline.Workspace)/drop"
+            az storage blob upload-batch --account-name $(storageAccount) --auth-mode login \
+              -s "$SRC" -d '$web' --overwrite --content-cache-control "public, max-age=31536000, immutable"
+            az storage blob upload --account-name $(storageAccount) --auth-mode login -c '$web' \
+              -f "$SRC/index.html" -n index.html --overwrite --content-type text/html \
+              --content-cache-control "no-cache"
+            az afd endpoint purge -g $(rgName) --profile-name $(afdProfile) \
+              --endpoint-name $(afdEndpoint) --content-paths '/index.html' '/config.json'
+      - template: ../../templates/steps/smoke-test.yml
+        parameters:
+          url: $(appUrl)

@@ -1,0 +1,49 @@
+name: kv-expiry-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 6 * * *'
+  displayName: Daily expiry check
+  branches: { include: [main] }
+  always: true
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+- name: warnDays
+  type: number
+  default: 30
+- name: failDays
+  type: number
+  default: 7
+
+jobs:
+- ${{ each env in parameters.environments }}:
+  - job: check_${{ env }}
+    pool: { vmImage: ubuntu-latest }
+    variables:
+    - group: vg-${{ env }}
+    - group: vg-kv-${{ env }}
+    steps:
+    - task: AzureCLI@2
+      displayName: Find expiring items in $(kvName)
+      inputs:
+        azureSubscription: sc-azure-${{ env }}
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          WARN=$(date -u -d '+${{ parameters.warnDays }} days' +%Y-%m-%dT%H:%M:%SZ)
+          FAIL=$(date -u -d '+${{ parameters.failDays }} days' +%Y-%m-%dT%H:%M:%SZ)
+          CERTS=$(az keyvault certificate list --vault-name $(kvName) --query "[?attributes.expires!=null && attributes.expires<'$WARN'].{n:name,e:attributes.expires}" -o tsv)
+          SECRETS=$(az keyvault secret list --vault-name $(kvName) --query "[?attributes.expires!=null && attributes.expires<'$WARN'].{n:name,e:attributes.expires}" -o tsv)
+          echo "Certificates:"; echo "$CERTS"; echo "Secrets:"; echo "$SECRETS"
+          echo "##vso[task.setvariable variable=found]$([ -n "$CERTS$SECRETS" ] && echo yes || echo no)"
+          CRIT=$(az keyvault secret list --vault-name $(kvName) --query "[?attributes.expires!=null && attributes.expires<'$FAIL'].name" -o tsv)
+          [ -n "$CRIT" ] && { echo "##vso[task.logissue type=error]Expires within ${{ parameters.failDays }} days: $CRIT"; exit 1; } || exit 0
+    - template: ../../templates/steps/notify-teams.yml
+      parameters:
+        title: Key Vault items expiring in ${{ env }}
+        message: See the run log for the list.
+        condition: or(failed(), eq(variables['found'], 'yes'))

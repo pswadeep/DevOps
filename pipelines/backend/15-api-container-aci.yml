@@ -1,0 +1,50 @@
+name: api-aci-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/partner-api/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage]
+
+stages:
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: partner-api
+    dockerfile: apps/partner-api/Dockerfile
+    context: apps/partner-api
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureKeyVault@2
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          KeyVaultName: $(kvName)
+          SecretsFilter: partnerApiKey
+          RunAsPreJob: false
+      - task: AzureCLI@2
+        displayName: Replace container group
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euo pipefail
+            az container delete -g $(rgName) -n $(aciName) --yes 2>/dev/null || true
+            az container create -g $(rgName) -n $(aciName) \
+              --image $(acrLoginServer)/partner-api:$(Build.BuildId) \
+              --assign-identity $(aciIdentityId) --acr-identity $(aciIdentityId) \
+              --registry-login-server $(acrLoginServer) \
+              --vnet $(vnetName) --subnet $(aciSubnet) \
+              --cpu 1 --memory 2 --ports 8080 --os-type Linux \
+              --secure-environment-variables API_KEY="$PARTNER_API_KEY" \
+              --environment-variables ASPNETCORE_ENVIRONMENT=${{ env }}
+            IP=$(az container show -g $(rgName) -n $(aciName) --query ipAddress.ip -o tsv)
+            echo "Container group IP: $IP"
+        env:
+          PARTNER_API_KEY: $(partnerApiKey)

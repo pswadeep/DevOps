@@ -1,0 +1,41 @@
+name: dev-start-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 5 * * 1-5'
+  displayName: Weekday morning start
+  branches: { include: [main] }
+  always: true
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage]
+
+jobs:
+- ${{ each env in parameters.environments }}:
+  - job: start_${{ env }}
+    pool: { vmImage: ubuntu-latest }
+    variables:
+    - group: vg-${{ env }}
+    steps:
+    - task: AzureCLI@2
+      displayName: Start compute in ${{ env }}
+      inputs:
+        azureSubscription: sc-azure-${{ env }}
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -uo pipefail
+          az aks start -g $(rgName) -n $(aksName)
+          for g in $(az container list -g $(rgName) --query "[?tags.shutdown=='true'].name" -o tsv); do
+            az container start -g $(rgName) -n "$g" || true
+          done
+          for v in $(az vm list -g $(rgName) --query "[?tags.shutdown=='true'].name" -o tsv); do
+            az vm start -g $(rgName) -n "$v" --no-wait || true
+          done
+    - template: ../../templates/steps/smoke-test.yml
+      parameters:
+        url: $(apiUrl)/health
+        retries: 30
+        delaySeconds: 20

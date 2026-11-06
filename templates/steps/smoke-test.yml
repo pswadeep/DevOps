@@ -1,0 +1,26 @@
+# Retry an HTTP endpoint until it returns the expected status.
+parameters:
+- name: url
+  type: string
+- name: expectedStatus
+  type: string
+  default: '200'
+- name: retries
+  type: number
+  default: 12
+- name: delaySeconds
+  type: number
+  default: 10
+
+steps:
+- bash: |
+    set -u
+    for i in $(seq 1 ${{ parameters.retries }}); do
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 '${{ parameters.url }}' || true)
+      echo "attempt $i: HTTP $code"
+      [ "$code" = "${{ parameters.expectedStatus }}" ] && exit 0
+      sleep ${{ parameters.delaySeconds }}
+    done
+    echo "##vso[task.logissue type=error]Smoke test failed: ${{ parameters.url }}"
+    exit 1
+  displayName: Smoke test ${{ parameters.url }}

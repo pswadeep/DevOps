@@ -1,0 +1,54 @@
+name: aks-upgrade-$(Date:yyyyMMdd)$(Rev:.r)
+trigger: none
+pr: none
+
+parameters:
+- name: targetVersion
+  displayName: Target Kubernetes version (for example 1.31.2)
+  type: string
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      buildStage: ''
+      steps:
+      - template: ../../templates/steps/aks-run.yml
+        parameters:
+          serviceConnection: sc-azure-${{ env }}
+          resourceGroup: $(rgName)
+          cluster: $(aksName)
+          displayName: Pre-checks (deprecated APIs, PDBs, versions)
+          script: |
+            az aks get-upgrades -g $(rgName) -n $(aksName) -o table
+            curl -fsSL https://github.com/FairwindsOps/pluto/releases/download/v5.20.3/pluto_5.20.3_linux_amd64.tar.gz | tar xz
+            ./pluto detect-helm -o wide || true
+            kubectl get pdb -A
+            kubectl get nodes -o wide
+      - task: AzureCLI@2
+        displayName: Upgrade control plane and node pools
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euo pipefail
+            az aks upgrade -g $(rgName) -n $(aksName) --kubernetes-version ${{ parameters.targetVersion }} --control-plane-only --yes
+            for NP in $(az aks nodepool list -g $(rgName) --cluster-name $(aksName) --query "[].name" -o tsv); do
+              az aks nodepool upgrade -g $(rgName) --cluster-name $(aksName) -n "$NP" \
+                --kubernetes-version ${{ parameters.targetVersion }} --max-surge 33% --yes
+            done
+      - template: ../../templates/steps/aks-run.yml
+        parameters:
+          serviceConnection: sc-azure-${{ env }}
+          resourceGroup: $(rgName)
+          cluster: $(aksName)
+          displayName: Post-checks
+          script: |
+            kubectl get nodes
+            kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
+            kubectl -n kube-system rollout status deploy/coredns --timeout=120s

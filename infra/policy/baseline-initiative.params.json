@@ -1,0 +1,9 @@
+{
+  "allowedLocations": {
+    "type": "Array",
+    "defaultValue": [
+      "westeurope",
+      "northeurope"
+    ]
+  }
+}

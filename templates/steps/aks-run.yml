@@ -1,0 +1,27 @@
+# Run kubectl/helm commands against AKS with Entra ID auth (kubelogin) inside one AzureCLI task.
+parameters:
+- name: serviceConnection
+  type: string
+- name: resourceGroup
+  type: string
+- name: cluster
+  type: string
+- name: displayName
+  type: string
+  default: Run on AKS
+- name: script
+  type: string
+
+steps:
+- task: AzureCLI@2
+  displayName: ${{ parameters.displayName }}
+  inputs:
+    azureSubscription: ${{ parameters.serviceConnection }}
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      set -euo pipefail
+      command -v kubelogin >/dev/null || sudo az aks install-cli --only-show-errors
+      az aks get-credentials -g ${{ parameters.resourceGroup }} -n ${{ parameters.cluster }} --overwrite-existing --only-show-errors
+      kubelogin convert-kubeconfig -l azurecli
+      ${{ parameters.script }}

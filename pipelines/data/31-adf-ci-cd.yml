@@ -1,0 +1,74 @@
+name: adf-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [adf/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [stage, prod]
+
+variables:
+- group: vg-dev
+
+stages:
+- stage: build
+  jobs:
+  - job: export
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: NodeTool@0
+      inputs: { versionSpec: '18.x' }
+    - task: Npm@1
+      displayName: Install utilities
+      inputs:
+        command: install
+        workingDir: adf/build
+    - task: Npm@1
+      displayName: Validate
+      inputs:
+        command: custom
+        workingDir: adf/build
+        customCommand: run build validate $(Build.Repository.LocalPath)/adf /subscriptions/$(subscriptionId)/resourceGroups/$(rgName)/providers/Microsoft.DataFactory/factories/$(adfName)
+    - task: Npm@1
+      displayName: Export ARM template
+      inputs:
+        command: custom
+        workingDir: adf/build
+        customCommand: run build export $(Build.Repository.LocalPath)/adf /subscriptions/$(subscriptionId)/resourceGroups/$(rgName)/providers/Microsoft.DataFactory/factories/$(adfName) "ArmTemplate"
+    - publish: adf/build/ArmTemplate
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      buildStage: build
+      steps:
+      - task: AzurePowerShell@5
+        displayName: Stop triggers
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          azurePowerShellVersion: LatestVersion
+          ScriptType: FilePath
+          ScriptPath: $(Pipeline.Workspace)/drop/PrePostDeploymentScript.ps1
+          ScriptArguments: -armTemplate "$(Pipeline.Workspace)/drop/ARMTemplateForFactory.json" -ResourceGroupName $(rgName) -DataFactoryName $(adfName) -predeployment $true -deleteDeployment $false
+      - task: AzureResourceManagerTemplateDeployment@3
+        displayName: Deploy factory
+        inputs:
+          azureResourceManagerConnection: sc-azure-${{ env }}
+          subscriptionId: $(subscriptionId)
+          resourceGroupName: $(rgName)
+          location: westeurope
+          csmFile: $(Pipeline.Workspace)/drop/ARMTemplateForFactory.json
+          csmParametersFile: $(Pipeline.Workspace)/drop/ARMTemplateParametersForFactory.json
+          overrideParameters: -factoryName "$(adfName)" -KeyVault_properties_typeProperties_baseUrl "https://$(kvName).vault.azure.net/"
+      - task: AzurePowerShell@5
+        displayName: Start triggers and clean up
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          azurePowerShellVersion: LatestVersion
+          ScriptType: FilePath
+          ScriptPath: $(Pipeline.Workspace)/drop/PrePostDeploymentScript.ps1
+          ScriptArguments: -armTemplate "$(Pipeline.Workspace)/drop/ARMTemplateForFactory.json" -ResourceGroupName $(rgName) -DataFactoryName $(adfName) -predeployment $false -deleteDeployment $true

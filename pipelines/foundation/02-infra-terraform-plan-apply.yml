@@ -1,0 +1,20 @@
+name: tf-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [infra/terraform/**, templates/**] }
+pr: none
+
+stages:
+- template: ../../templates/stages/terraform-env.yml
+  parameters:
+    envName: dev
+
+- template: ../../templates/stages/terraform-env.yml
+  parameters:
+    envName: stage
+    dependsOn: [apply_dev]
+
+- template: ../../templates/stages/terraform-env.yml
+  parameters:
+    envName: prod
+    dependsOn: [apply_stage]

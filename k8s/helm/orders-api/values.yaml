@@ -1,0 +1,33 @@
+replicaCount: 2
+image:
+  repository: acmeacr.azurecr.io/orders-api
+  tag: latest
+  pullPolicy: IfNotPresent
+containerPort: 3000
+color: ""          # blue/green selector label (pipeline 21)
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+ingress:
+  enabled: true
+  className: nginx
+  host: orders.example.com
+  canary:
+    enabled: false
+    weight: 0
+rollout:
+  maxUnavailable: 0
+  maxSurge: 1
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 256Mi }
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPU: 70
+pdb:
+  enabled: true
+  minAvailable: 1
+env: {}

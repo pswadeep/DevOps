@@ -1,0 +1,9 @@
+node_modules/
+.terraform/
+*.tfstate*
+tfplan
+*.dacpac
+dist/
+bin/
+obj/
+__pycache__/

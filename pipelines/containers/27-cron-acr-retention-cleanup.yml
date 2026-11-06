@@ -1,0 +1,36 @@
+name: acr-cleanup-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 21 * * 0'
+  displayName: Weekly ACR purge
+  branches: { include: [main] }
+  always: true
+
+parameters:
+- name: dryRun
+  type: boolean
+  default: true
+- name: olderThan
+  type: string
+  default: 30d
+
+variables:
+- group: vg-shared
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- task: AzureCLI@2
+  displayName: acr purge (dryRun=${{ parameters.dryRun }})
+  inputs:
+    azureSubscription: sc-azure-dev
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      set -euo pipefail
+      DRY=""; [ "${{ parameters.dryRun }}" = "True" ] && DRY="--dry-run"
+      for REPO in $(az acr repository list -n $(acrName) -o tsv); do
+        az acr run -r $(acrName) --cmd \
+          "acr purge --filter '${REPO}:^[0-9]+$' --ago ${{ parameters.olderThan }} --keep 10 --untagged $DRY" /dev/null
+      done

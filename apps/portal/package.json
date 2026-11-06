@@ -1,0 +1,8 @@
+{
+  "name": "portal",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "mkdir -p dist/portal/browser && echo '<h1>portal</h1>' > dist/portal/browser/index.html",
+    "test": "echo ok"
+  }
+}

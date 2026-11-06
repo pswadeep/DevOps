@@ -1,0 +1,40 @@
+name: aks-rolling-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/orders-api/**, k8s/helm/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: orders-api
+    dockerfile: apps/orders-api/Dockerfile
+    context: apps/orders-api
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - template: ../../templates/steps/aks-run.yml
+        parameters:
+          serviceConnection: sc-azure-${{ env }}
+          resourceGroup: $(rgName)
+          cluster: $(aksName)
+          displayName: Rolling deploy and verify (${{ env }})
+          script: |
+            helm upgrade --install orders k8s/helm/orders-api -n orders --create-namespace \
+              -f k8s/helm/orders-api/values-${{ env }}.yaml \
+              --set image.repository=$(acrLoginServer)/orders-api --set image.tag=$(Build.BuildId) \
+              --set rollout.maxUnavailable=0 --set rollout.maxSurge=1 --wait --timeout 6m
+            if ! kubectl -n orders rollout status deploy/orders --timeout=180s; then
+              echo "##vso[task.logissue type=error]Rollout failed, rolling back"
+              helm rollback orders -n orders --wait
+              exit 1
+            fi
+            kubectl -n orders get pods -l app.kubernetes.io/instance=orders -o wide

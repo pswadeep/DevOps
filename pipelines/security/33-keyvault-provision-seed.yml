@@ -1,0 +1,48 @@
+name: kv-seed-$(Date:yyyyMMdd)$(Rev:.r)
+trigger: none
+pr: none
+
+parameters:
+- name: envName
+  type: string
+  default: dev
+  values: [dev, stage, prod]
+- name: appIdentityObjectId
+  displayName: Managed identity object ID that should read secrets
+  type: string
+
+variables:
+- group: vg-${{ parameters.envName }}
+
+stages:
+- stage: keyvault
+  jobs:
+  - deployment: seed
+    environment: ${{ parameters.envName }}
+    pool: { vmImage: ubuntu-latest }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            displayName: Ensure vault, role assignment and secrets
+            inputs:
+              azureSubscription: sc-azure-${{ parameters.envName }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az keyvault show -n $(kvName) >/dev/null 2>&1 || az keyvault create -n $(kvName) -g $(rgName) -l westeurope \
+                  --enable-rbac-authorization true --enable-purge-protection true --retention-days 90 --public-network-access Enabled
+                KV_ID=$(az keyvault show -n $(kvName) --query id -o tsv)
+                az role assignment create --assignee-object-id ${{ parameters.appIdentityObjectId }} \
+                  --assignee-principal-type ServicePrincipal --role "Key Vault Secrets User" --scope "$KV_ID" -o none || true
+                EXP=$(date -u -d '+180 days' +%Y-%m-%dT%H:%M:%SZ)
+                if [ -n "${DB_PASSWORD:-}" ]; then
+                  az keyvault secret set --vault-name $(kvName) -n ordersDbPassword --value "$DB_PASSWORD" --expires "$EXP" -o none
+                fi
+                if [ -z "$(az keyvault secret list --vault-name $(kvName) --query "[?name=='orders-session-key']" -o tsv)" ]; then
+                  az keyvault secret set --vault-name $(kvName) -n orders-session-key --value "$(openssl rand -base64 48)" --expires "$EXP" -o none
+                fi
+            env:
+              DB_PASSWORD: $(seedDbPassword)

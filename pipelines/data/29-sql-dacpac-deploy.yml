@@ -1,0 +1,58 @@
+name: sql-dacpac-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [db/schema/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+- name: allowDataLoss
+  type: boolean
+  default: false
+
+stages:
+- stage: build
+  jobs:
+  - job: dacpac
+    pool: { vmImage: windows-latest }
+    steps:
+    - task: DotNetCoreCLI@2
+      displayName: Build SQL project
+      inputs:
+        command: build
+        projects: db/schema/OrdersDb.sqlproj
+        arguments: -c Release -o $(Build.ArtifactStagingDirectory)/dacpac
+    - publish: $(Build.ArtifactStagingDirectory)/dacpac
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      pool:
+        vmImage: windows-latest
+      steps:
+      - task: SqlAzureDacpacDeployment@1
+        displayName: Deploy report
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          AuthenticationType: servicePrincipal
+          ServerName: $(sqlServer).database.windows.net
+          DatabaseName: $(sqlDb)
+          deployType: DacpacTask
+          DeploymentAction: DeployReport
+          DacpacFile: $(Pipeline.Workspace)/drop/OrdersDb.dacpac
+          OutputFile: $(Build.ArtifactStagingDirectory)/report-${{ env }}.xml
+      - task: SqlAzureDacpacDeployment@1
+        displayName: Publish DACPAC
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          AuthenticationType: servicePrincipal
+          ServerName: $(sqlServer).database.windows.net
+          DatabaseName: $(sqlDb)
+          deployType: DacpacTask
+          DeploymentAction: Publish
+          DacpacFile: $(Pipeline.Workspace)/drop/OrdersDb.dacpac
+          AdditionalArguments: /p:BlockOnPossibleDataLoss=${{ lower(not(parameters.allowDataLoss)) }} /p:DropObjectsNotInSource=false

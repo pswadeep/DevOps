@@ -1,0 +1,24 @@
+name: governance-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [setup/**, scripts/azdo-sync.sh] }
+pr: none
+schedules:
+- cron: '0 3 * * 0'          # Sunday 03:00 UTC
+  displayName: Weekly drift correction
+  branches: { include: [main] }
+  always: true
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- checkout: self
+- bash: |
+    set -euo pipefail
+    az extension add --name azure-devops --only-show-errors
+    ./scripts/azdo-sync.sh setup/project.json
+  displayName: Sync environments, variable groups, policies
+  env:
+    AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
+    ADO_ORG: $(System.CollectionUri)
+    ADO_PROJECT: $(System.TeamProject)

@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: orders }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: orders } }
+  template:
+    metadata: { labels: { app: orders } }
+    spec:
+      containers:
+      - name: app
+        image: acmeacr.azurecr.io/orders-api:latest
+        ports: [{ containerPort: 3000 }]
+        readinessProbe: { httpGet: { path: /health, port: 3000 } }

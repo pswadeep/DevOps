@@ -1,0 +1,49 @@
+name: be-func-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/ingest-func/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: build
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: UsePythonVersion@0
+      inputs: { versionSpec: '3.11' }
+    - bash: |
+        pip install -r requirements.txt --target=".python_packages/lib/site-packages"
+        pip install pytest && pytest -q
+      workingDirectory: apps/ingest-func
+      displayName: Install, test
+    - task: ArchiveFiles@2
+      inputs:
+        rootFolderOrFile: apps/ingest-func
+        includeRootFolder: false
+        archiveFile: $(Build.ArtifactStagingDirectory)/func.zip
+    - publish: $(Build.ArtifactStagingDirectory)/func.zip
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureFunctionApp@2
+        displayName: Deploy function package
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          appType: functionAppLinux
+          appName: $(funcAppName)
+          package: $(Pipeline.Workspace)/drop/func.zip
+          runtimeStack: PYTHON|3.11
+          deploymentMethod: runFromPackage
+      - template: ../../templates/steps/smoke-test.yml
+        parameters:
+          url: https://$(funcAppName).azurewebsites.net/api/health

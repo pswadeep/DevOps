@@ -1,0 +1,388 @@
+{
+  "organization": "https://dev.azure.com/acme",
+  "project": "platform",
+  "repository": "acme-devops-platform",
+  "environments": [
+    {
+      "name": "dev",
+      "approvals": [],
+      "checks": []
+    },
+    {
+      "name": "stage",
+      "approvals": [],
+      "checks": []
+    },
+    {
+      "name": "prod",
+      "approvals": [
+        "release-managers"
+      ],
+      "checks": [
+        "branch-control:main",
+        "business-hours"
+      ]
+    }
+  ],
+  "variableGroups": [
+    {
+      "name": "vg-shared"
+    },
+    {
+      "name": "vg-dev"
+    },
+    {
+      "name": "vg-stage"
+    },
+    {
+      "name": "vg-prod"
+    },
+    {
+      "name": "vg-kv-dev",
+      "keyVault": "kv-acme-dev-001"
+    },
+    {
+      "name": "vg-kv-stage",
+      "keyVault": "kv-acme-stage-001"
+    },
+    {
+      "name": "vg-kv-prod",
+      "keyVault": "kv-acme-prod-001"
+    }
+  ],
+  "branchPolicies": [
+    "main"
+  ],
+  "pipelines": [
+    {
+      "name": "01-infra-bootstrap-tfstate",
+      "file": "pipelines/foundation/01-infra-bootstrap-tfstate.yml",
+      "group": "foundation",
+      "title": "Bootstrap Terraform remote state"
+    },
+    {
+      "name": "02-infra-terraform-plan-apply",
+      "file": "pipelines/foundation/02-infra-terraform-plan-apply.yml",
+      "group": "foundation",
+      "title": "Terraform plan and apply across dev, stage, prod"
+    },
+    {
+      "name": "03-infra-pr-validate",
+      "file": "pipelines/foundation/03-infra-pr-validate.yml",
+      "group": "foundation",
+      "title": "Infrastructure pull request validation"
+    },
+    {
+      "name": "04-azdo-governance-sync",
+      "file": "pipelines/foundation/04-azdo-governance-sync.yml",
+      "group": "foundation",
+      "title": "Azure DevOps governance as code"
+    },
+    {
+      "name": "05-bicep-landing-zone",
+      "file": "pipelines/foundation/05-bicep-landing-zone.yml",
+      "group": "foundation",
+      "title": "Bicep landing zone (what-if, then deploy)"
+    },
+    {
+      "name": "06-fe-react-static-web-app",
+      "file": "pipelines/frontend/06-fe-react-static-web-app.yml",
+      "group": "frontend",
+      "title": "React SPA to Azure Static Web Apps"
+    },
+    {
+      "name": "07-fe-react-blob-frontdoor",
+      "file": "pipelines/frontend/07-fe-react-blob-frontdoor.yml",
+      "group": "frontend",
+      "title": "SPA to Blob static website behind Front Door"
+    },
+    {
+      "name": "08-fe-angular-webapp-linux",
+      "file": "pipelines/frontend/08-fe-angular-webapp-linux.yml",
+      "group": "frontend",
+      "title": "Angular app to App Service (Linux) with SPA routing"
+    },
+    {
+      "name": "09-fe-nginx-container-aci",
+      "file": "pipelines/frontend/09-fe-nginx-container-aci.yml",
+      "group": "frontend",
+      "title": "Nginx front-end container to Azure Container Instances"
+    },
+    {
+      "name": "10-fe-nextjs-container-webapp",
+      "file": "pipelines/frontend/10-fe-nextjs-container-webapp.yml",
+      "group": "frontend",
+      "title": "Next.js container to Web App for Containers with Key Vault references"
+    },
+    {
+      "name": "11-be-dotnet-webapp-slot-swap",
+      "file": "pipelines/backend/11-be-dotnet-webapp-slot-swap.yml",
+      "group": "backend",
+      "title": ".NET API to App Service with staging slot and swap"
+    },
+    {
+      "name": "12-be-node-container-webapp",
+      "file": "pipelines/backend/12-be-node-container-webapp.yml",
+      "group": "backend",
+      "title": "Node.js API container to Web App with Key Vault task"
+    },
+    {
+      "name": "13-be-python-function-app",
+      "file": "pipelines/backend/13-be-python-function-app.yml",
+      "group": "backend",
+      "title": "Python Azure Functions with slot deployment"
+    },
+    {
+      "name": "14-be-java-aks-helm",
+      "file": "pipelines/backend/14-be-java-aks-helm.yml",
+      "group": "backend",
+      "title": "Spring Boot API to AKS with Helm (build, test, deploy)"
+    },
+    {
+      "name": "15-api-container-aci",
+      "file": "pipelines/backend/15-api-container-aci.yml",
+      "group": "backend",
+      "title": "REST API to Azure Container Instances with secure environment variables"
+    },
+    {
+      "name": "16-api-container-apps",
+      "file": "pipelines/backend/16-api-container-apps.yml",
+      "group": "backend",
+      "title": "API to Azure Container Apps with revisions and traffic split"
+    },
+    {
+      "name": "17-api-apim-publish",
+      "file": "pipelines/backend/17-api-apim-publish.yml",
+      "group": "backend",
+      "title": "Publish APIs to Azure API Management"
+    },
+    {
+      "name": "18-api-contract-tests-newman",
+      "file": "pipelines/backend/18-api-contract-tests-newman.yml",
+      "group": "backend",
+      "title": "Post-deployment API tests triggered by a deployment"
+    },
+    {
+      "name": "19-aks-rolling-helm-multienv",
+      "file": "pipelines/aks/19-aks-rolling-helm-multienv.yml",
+      "group": "aks",
+      "title": "AKS rolling update with HPA, PDB and automatic rollback"
+    },
+    {
+      "name": "20-aks-canary",
+      "file": "pipelines/aks/20-aks-canary.yml",
+      "group": "aks",
+      "title": "AKS canary release with ingress weights and metric gate"
+    },
+    {
+      "name": "21-aks-blue-green",
+      "file": "pipelines/aks/21-aks-blue-green.yml",
+      "group": "aks",
+      "title": "AKS blue-green with Service selector switch"
+    },
+    {
+      "name": "22-aks-gitops-argocd-tag-bump",
+      "file": "pipelines/aks/22-aks-gitops-argocd-tag-bump.yml",
+      "group": "aks",
+      "title": "GitOps: CI bumps the image tag, Argo CD deploys"
+    },
+    {
+      "name": "23-aks-kustomize-overlays",
+      "file": "pipelines/aks/23-aks-kustomize-overlays.yml",
+      "group": "aks",
+      "title": "Kustomize overlays with diff on PR and prune on deploy"
+    },
+    {
+      "name": "24-aks-cluster-upgrade",
+      "file": "pipelines/aks/24-aks-cluster-upgrade.yml",
+      "group": "aks",
+      "title": "AKS cluster and node pool upgrade with pre and post checks"
+    },
+    {
+      "name": "25-acr-build-scan-promote",
+      "file": "pipelines/containers/25-acr-build-scan-promote.yml",
+      "group": "containers",
+      "title": "ACR build, vulnerability scan and registry promotion"
+    },
+    {
+      "name": "26-helm-chart-oci-publish",
+      "file": "pipelines/containers/26-helm-chart-oci-publish.yml",
+      "group": "containers",
+      "title": "Package and publish Helm charts to ACR (OCI)"
+    },
+    {
+      "name": "27-cron-acr-retention-cleanup",
+      "file": "pipelines/containers/27-cron-acr-retention-cleanup.yml",
+      "group": "containers",
+      "title": "Scheduled ACR cleanup (purge old tags and untagged manifests)"
+    },
+    {
+      "name": "28-blob-storage-config-sync",
+      "file": "pipelines/data/28-blob-storage-config-sync.yml",
+      "group": "data",
+      "title": "Blob storage configuration as code and data sync with AzCopy"
+    },
+    {
+      "name": "29-sql-dacpac-deploy",
+      "file": "pipelines/data/29-sql-dacpac-deploy.yml",
+      "group": "data",
+      "title": "Azure SQL schema deployment with DACPAC and drift report"
+    },
+    {
+      "name": "30-sql-ef-migrations",
+      "file": "pipelines/data/30-sql-ef-migrations.yml",
+      "group": "data",
+      "title": "Entity Framework migrations as a reviewed script"
+    },
+    {
+      "name": "31-adf-ci-cd",
+      "file": "pipelines/data/31-adf-ci-cd.yml",
+      "group": "data",
+      "title": "Azure Data Factory CI/CD with ARM export and trigger handling"
+    },
+    {
+      "name": "32-servicebus-eventhub-bicep",
+      "file": "pipelines/data/32-servicebus-eventhub-bicep.yml",
+      "group": "data",
+      "title": "Service Bus and Event Hubs deployment with Bicep"
+    },
+    {
+      "name": "33-keyvault-provision-seed",
+      "file": "pipelines/security/33-keyvault-provision-seed.yml",
+      "group": "security",
+      "title": "Key Vault provisioning, RBAC and secret seeding"
+    },
+    {
+      "name": "34-cron-keyvault-secret-rotation",
+      "file": "pipelines/security/34-cron-keyvault-secret-rotation.yml",
+      "group": "security",
+      "title": "Scheduled secret rotation (storage account keys, two-key pattern)"
+    },
+    {
+      "name": "35-cron-keyvault-expiry-monitor",
+      "file": "pipelines/security/35-cron-keyvault-expiry-monitor.yml",
+      "group": "security",
+      "title": "Daily Key Vault certificate and secret expiry monitor"
+    },
+    {
+      "name": "36-sast-sca-pr-gate",
+      "file": "pipelines/security/36-sast-sca-pr-gate.yml",
+      "group": "security",
+      "title": "Code security gate: SAST, dependency audit and license check"
+    },
+    {
+      "name": "37-secret-scan-gitleaks",
+      "file": "pipelines/security/37-secret-scan-gitleaks.yml",
+      "group": "security",
+      "title": "Secret scanning with Gitleaks (PR and nightly history scan)"
+    },
+    {
+      "name": "38-azure-policy-as-code",
+      "file": "pipelines/security/38-azure-policy-as-code.yml",
+      "group": "security",
+      "title": "Azure Policy and Defender for Cloud as code"
+    },
+    {
+      "name": "39-npm-publish-azure-artifacts",
+      "file": "pipelines/artifacts/39-npm-publish-azure-artifacts.yml",
+      "group": "artifacts",
+      "title": "Publish an npm package to Azure Artifacts with prerelease versions"
+    },
+    {
+      "name": "40-nuget-publish-azure-artifacts",
+      "file": "pipelines/artifacts/40-nuget-publish-azure-artifacts.yml",
+      "group": "artifacts",
+      "title": "Pack and publish NuGet libraries with Source Link and symbols"
+    },
+    {
+      "name": "41-universal-package-promote",
+      "file": "pipelines/artifacts/41-universal-package-promote.yml",
+      "group": "artifacts",
+      "title": "Universal Packages: publish build output and promote through views"
+    },
+    {
+      "name": "42-cron-artifact-feed-retention",
+      "file": "pipelines/artifacts/42-cron-artifact-feed-retention.yml",
+      "group": "artifacts",
+      "title": "Scheduled artifact and feed retention clean-up"
+    },
+    {
+      "name": "43-release-semver-tag-notes",
+      "file": "pipelines/release/43-release-semver-tag-notes.yml",
+      "group": "release",
+      "title": "Release tagging, semantic version and generated release notes"
+    },
+    {
+      "name": "44-hotfix-fast-track",
+      "file": "pipelines/release/44-hotfix-fast-track.yml",
+      "group": "release",
+      "title": "Hotfix fast track to production"
+    },
+    {
+      "name": "45-rollback-pipeline",
+      "file": "pipelines/release/45-rollback-pipeline.yml",
+      "group": "release",
+      "title": "One-click rollback to a previous build"
+    },
+    {
+      "name": "46-e2e-microservice-dev-stage-prod",
+      "file": "pipelines/e2e/46-e2e-microservice-dev-stage-prod.yml",
+      "group": "e2e",
+      "title": "Flagship: end-to-end microservice, dev then stage then prod"
+    },
+    {
+      "name": "47-cron-nightly-dev-shutdown",
+      "file": "pipelines/cron/47-cron-nightly-dev-shutdown.yml",
+      "group": "cron",
+      "title": "Nightly shutdown of dev and test resources"
+    },
+    {
+      "name": "48-cron-morning-dev-start",
+      "file": "pipelines/cron/48-cron-morning-dev-start.yml",
+      "group": "cron",
+      "title": "Morning start of dev and test resources"
+    },
+    {
+      "name": "49-cron-cost-anomaly-report",
+      "file": "pipelines/cron/49-cron-cost-anomaly-report.yml",
+      "group": "cron",
+      "title": "Weekly cost report and anomaly check"
+    },
+    {
+      "name": "50-cron-stale-resource-cleanup",
+      "file": "pipelines/cron/50-cron-stale-resource-cleanup.yml",
+      "group": "cron",
+      "title": "Cleanup of stale and expired resources"
+    },
+    {
+      "name": "51-cron-terraform-drift-detect",
+      "file": "pipelines/cron/51-cron-terraform-drift-detect.yml",
+      "group": "cron",
+      "title": "Nightly Terraform drift detection"
+    },
+    {
+      "name": "52-cron-sql-backup-restore-verify",
+      "file": "pipelines/cron/52-cron-sql-backup-restore-verify.yml",
+      "group": "cron",
+      "title": "Monthly SQL backup export and restore test"
+    },
+    {
+      "name": "53-perf-load-test-k6",
+      "file": "pipelines/quality/53-perf-load-test-k6.yml",
+      "group": "quality",
+      "title": "Performance and load test with k6 against stage"
+    },
+    {
+      "name": "54-ml-yolo-model-package-aci",
+      "file": "pipelines/ml/54-ml-yolo-model-package-aci.yml",
+      "group": "ml",
+      "title": "ML model packaging and ACI inference deployment (YOLOv8 example)"
+    },
+    {
+      "name": "55-cron-weekly-dependency-audit",
+      "file": "pipelines/cron/55-cron-weekly-dependency-audit.yml",
+      "group": "cron",
+      "title": "Weekly dependency audit that opens Azure Boards work items"
+    }
+  ]
+}

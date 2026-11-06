@@ -1,0 +1,44 @@
+name: be-node-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/orders-api/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: orders-api
+    dockerfile: apps/orders-api/Dockerfile
+    context: apps/orders-api
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureKeyVault@2
+        displayName: Read DB connection from Key Vault
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          KeyVaultName: $(kvName)
+          SecretsFilter: ordersDbConnection
+          RunAsPreJob: false
+      - bash: |
+          docker run --rm -e DB_URL="$DB_URL" $(acrLoginServer)/orders-api:$(Build.BuildId) npm run migrate
+        displayName: Run migrations
+        env:
+          DB_URL: $(ordersDbConnection)
+      - task: AzureWebAppContainer@1
+        displayName: Deploy container
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          appName: $(webAppName)
+          containers: $(acrLoginServer)/orders-api:$(Build.BuildId)
+      - template: ../../templates/steps/smoke-test.yml
+        parameters:
+          url: https://$(webAppName).azurewebsites.net/healthz

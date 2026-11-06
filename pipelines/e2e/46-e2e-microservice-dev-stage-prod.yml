@@ -1,0 +1,68 @@
+name: orders-e2e-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/orders-api/**, k8s/helm/orders-api/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: test
+  jobs:
+  - job: unit
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: NodeTool@0
+      inputs: { versionSpec: '20.x' }
+    - bash: cd apps/orders-api && npm ci && npm test -- --ci
+    - bash: cd apps/orders-api && npm audit --audit-level=high
+
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: orders-api
+    dockerfile: apps/orders-api/Dockerfile
+    context: apps/orders-api
+    stageName: build
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - ${{ if ne(env, 'prod') }}:
+        - template: ../../templates/steps/aks-run.yml
+          parameters:
+            serviceConnection: sc-azure-${{ env }}
+            resourceGroup: $(rgName)
+            cluster: $(aksName)
+            displayName: Helm upgrade (rolling)
+            script: |
+              helm upgrade --install orders-api k8s/helm/orders-api --namespace orders --create-namespace \
+                -f k8s/helm/orders-api/values-${{ env }}.yaml \
+                --set image.repository=$(acrLoginServer)/orders-api --set image.tag=$(Build.BuildId) --atomic --timeout 5m
+      - ${{ if eq(env, 'prod') }}:
+        - template: ../../templates/steps/aks-run.yml
+          parameters:
+            serviceConnection: sc-azure-prod
+            resourceGroup: $(rgName)
+            cluster: $(aksName)
+            displayName: Canary 10 percent, check, then promote
+            script: |
+              helm upgrade --install orders-api-canary k8s/helm/orders-api --namespace orders \
+                -f k8s/helm/orders-api/values-prod.yaml --set image.repository=$(acrLoginServer)/orders-api \
+                --set image.tag=$(Build.BuildId) --set ingress.canary.enabled=true --set ingress.canary.weight=10 --wait
+              bash scripts/canary-check.sh $(apiUrl)/health 60
+              helm upgrade --install orders-api k8s/helm/orders-api --namespace orders \
+                -f k8s/helm/orders-api/values-prod.yaml --set image.repository=$(acrLoginServer)/orders-api \
+                --set image.tag=$(Build.BuildId) --atomic --timeout 8m
+              helm uninstall orders-api-canary --namespace orders
+      - template: ../../templates/steps/smoke-test.yml
+        parameters:
+          url: $(apiUrl)/health
+      - template: ../../templates/steps/notify-teams.yml
+        parameters:
+          title: orders-api ${{ env }} deployed
+          message: Build $(Build.BuildId)

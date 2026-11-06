@@ -1,0 +1,36 @@
+name: release-$(Date:yyyyMMdd)$(Rev:.r)
+trigger: none
+pr: none
+
+parameters:
+- name: bump
+  type: string
+  default: minor
+  values: [major, minor, patch]
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- checkout: self
+  fetchDepth: 0
+  persistCredentials: true
+- bash: |
+    set -euo pipefail
+    LAST=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)
+    IFS=. read -r MA MI PA <<< "${LAST#v}"
+    case "${{ parameters.bump }}" in
+      major) MA=$((MA+1)); MI=0; PA=0 ;;
+      minor) MI=$((MI+1)); PA=0 ;;
+      patch) PA=$((PA+1)) ;;
+    esac
+    NEXT="v$MA.$MI.$PA"
+    echo "$LAST -> $NEXT"
+    echo "##vso[task.setvariable variable=nextTag]$NEXT"
+    {
+      echo "# Release $NEXT"; echo
+      git log "$LAST"..HEAD --merges --pretty='- %s (%an)'
+    } > $(Build.ArtifactStagingDirectory)/RELEASE_NOTES.md
+    git tag "$NEXT" && git push origin "$NEXT"
+  displayName: Compute version, tag and notes
+- publish: $(Build.ArtifactStagingDirectory)/RELEASE_NOTES.md
+  artifact: release-notes

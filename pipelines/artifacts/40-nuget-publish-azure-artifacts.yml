@@ -1,0 +1,41 @@
+name: nuget-pub-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [libs/logging/**] }
+pr: none
+
+variables:
+- name: version
+  value: 3.2.$(Build.BuildId)
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- task: UseDotNet@2
+  inputs: { version: 8.x }
+- task: DotNetCoreCLI@2
+  displayName: Test
+  inputs:
+    command: test
+    projects: libs/logging/**/*Tests.csproj
+- task: DotNetCoreCLI@2
+  displayName: Pack
+  inputs:
+    command: pack
+    packagesToPack: libs/logging/src/Acme.Logging.csproj
+    versioningScheme: byEnvVar
+    versionEnvVar: version
+    configuration: Release
+- task: NuGetAuthenticate@1
+- task: NuGetCommand@2
+  displayName: Push to feed
+  inputs:
+    command: push
+    nuGetFeedType: internal
+    publishVstsFeed: platform/acme-feed
+    allowPackageConflicts: false
+- bash: |
+    curl -fsS -X PATCH -H "Authorization: Bearer $(System.AccessToken)" -H "Content-Type: application/json" \
+      -d '{"views":{"op":"add","path":"/views/-","value":"Release"}}' \
+      "https://pkgs.dev.azure.com/$(adoOrg)/platform/_apis/packaging/feeds/acme-feed/nuget/packages/Acme.Logging/versions/$(version)?api-version=7.1-preview.1"
+  displayName: Promote to @Release view

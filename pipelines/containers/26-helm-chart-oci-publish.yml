@@ -1,0 +1,32 @@
+name: helm-oci-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [k8s/helm/**] }
+pr: none
+
+variables:
+- group: vg-shared
+- name: chartVersion
+  value: 1.4.$(Build.BuildId)
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- checkout: self
+- bash: |
+    helm lint k8s/helm/orders-api
+    helm template t k8s/helm/orders-api | head -20
+  displayName: Lint and render
+- task: AzureCLI@2
+  displayName: Package and push chart
+  inputs:
+    azureSubscription: sc-azure-dev
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      set -euo pipefail
+      TOKEN=$(az acr login -n $(acrName) --expose-token --query accessToken -o tsv)
+      echo "$TOKEN" | helm registry login $(acrLoginServer) --username 00000000-0000-0000-0000-000000000000 --password-stdin
+      helm package k8s/helm/orders-api --version $(chartVersion) --app-version $(Build.BuildId) -d $(Build.ArtifactStagingDirectory)
+      helm push $(Build.ArtifactStagingDirectory)/orders-api-$(chartVersion).tgz oci://$(acrLoginServer)/helm
+      helm pull oci://$(acrLoginServer)/helm/orders-api --version $(chartVersion) -d /tmp/verify

@@ -1,0 +1,43 @@
+name: api-aca-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/catalog-api/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- template: ../../templates/stages/build-docker.yml
+  parameters:
+    repository: catalog-api
+    dockerfile: apps/catalog-api/Dockerfile
+    context: apps/catalog-api
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureCLI@2
+        displayName: New revision, test, shift traffic
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euo pipefail
+            az extension add --name containerapp --upgrade --only-show-errors
+            REV=b$(Build.BuildId)
+            az containerapp update -g $(rgName) -n $(acaName) \
+              --image $(acrLoginServer)/catalog-api:$(Build.BuildId) --revision-suffix "$REV" -o none
+            FQDN=$(az containerapp revision show -g $(rgName) -n $(acaName) --revision $(acaName)--$REV --query properties.fqdn -o tsv)
+            az containerapp ingress traffic set -g $(rgName) -n $(acaName) --revision-weight latest=0 -o none
+            for i in $(seq 1 12); do curl -fs "https://$FQDN/health" && break || sleep 10; done
+            for W in 10 50 100; do
+              az containerapp ingress traffic set -g $(rgName) -n $(acaName) --revision-weight latest=$W -o none
+              echo "latest revision now at $W%"; sleep 30
+              curl -fs "https://$(acaName).$(acaDomain)/health" >/dev/null
+            done

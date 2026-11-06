@@ -1,0 +1,39 @@
+name: api-tests-$(Date:yyyyMMdd)$(Rev:.r)
+trigger: none
+pr: none
+
+resources:
+  pipelines:
+  - pipeline: orders
+    source: 12-be-node-container-webapp   # name of the registered pipeline
+    trigger:
+      stages: [deploy_stage]              # fire when this stage succeeds
+
+variables:
+- group: vg-stage
+- group: vg-kv-stage
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- checkout: self
+- task: NodeTool@0
+  inputs: { versionSpec: '20.x' }
+- bash: |
+    npm install -g newman newman-reporter-junitfull
+    newman run tests/newman/orders.postman_collection.json \
+      --env-var baseUrl=$(apiUrl) --env-var apiKey="$API_KEY" \
+      -r cli,junitfull --reporter-junitfull-export $(Build.ArtifactStagingDirectory)/newman.xml
+  displayName: Run Newman
+  env:
+    API_KEY: $(partnerApiKey)
+- task: PublishTestResults@2
+  condition: always()
+  inputs:
+    testResultsFormat: JUnit
+    testResultsFiles: $(Build.ArtifactStagingDirectory)/newman.xml
+    testRunTitle: API contract tests (stage)
+- template: ../../templates/steps/notify-teams.yml
+  parameters:
+    title: API tests failed on stage
+    condition: failed()

@@ -1,0 +1,33 @@
+name: infra-pr-$(Build.BuildId)
+# Azure Repos ignores 'pr:' in YAML; the trigger is a branch policy (see setup/bootstrap.ps1).
+trigger: none
+pr: none
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- checkout: self
+- bash: |
+    set -euo pipefail
+    cd infra/terraform
+    terraform fmt -check -recursive
+  displayName: terraform fmt
+- bash: |
+    set -euo pipefail
+    curl -fsSL https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+    cd infra/terraform/envs/dev
+    terraform init -backend=false -input=false
+    terraform validate
+    tflint --recursive --chdir=../..
+  displayName: validate and tflint
+- bash: |
+    pip install --quiet checkov==3.2.*
+    checkov -d infra/terraform --framework terraform --quiet --soft-fail-on LOW \
+      --output junitxml --output-file-path $(Build.ArtifactStagingDirectory)/checkov
+  displayName: Checkov policy scan
+- task: PublishTestResults@2
+  condition: always()
+  inputs:
+    testResultsFormat: JUnit
+    testResultsFiles: '$(Build.ArtifactStagingDirectory)/checkov/*.xml'
+    testRunTitle: Checkov

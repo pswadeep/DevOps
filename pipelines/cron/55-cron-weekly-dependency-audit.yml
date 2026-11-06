@@ -1,0 +1,48 @@
+name: dep-audit-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 3 * * 1'
+  displayName: Weekly audit
+  branches: { include: [main] }
+  always: true
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- checkout: self
+- task: NodeTool@0
+  inputs: { versionSpec: '20.x' }
+- bash: |
+    set -uo pipefail
+    cd apps/orders-api && npm ci --ignore-scripts >/dev/null
+    npm audit --json > $(Build.ArtifactStagingDirectory)/audit.json || true
+    npm outdated --json > $(Build.ArtifactStagingDirectory)/outdated.json || true
+  displayName: Collect audit data
+- bash: |
+    python3 - <<'PY'
+    import json, os, urllib.request, base64
+    data = json.load(open(os.environ["OUT"] + "/audit.json"))
+    vulns = data.get("vulnerabilities", {})
+    org, proj = os.environ["ORG"], os.environ["PROJ"]
+    tok = base64.b64encode((":" + os.environ["TOKEN"]).encode()).decode()
+    for name, v in vulns.items():
+        if v.get("severity") not in ("high", "critical"):
+            continue
+        body = json.dumps([
+            {"op": "add", "path": "/fields/System.Title", "value": f"Vulnerable dependency: {name} ({v['severity']})"},
+            {"op": "add", "path": "/fields/System.Tags", "value": "security;dependency-audit"},
+        ]).encode()
+        req = urllib.request.Request(f"{org}/{proj}/_apis/wit/workitems/$Bug?api-version=7.1", data=body, method="POST",
+            headers={"Content-Type": "application/json-patch+json", "Authorization": "Basic " + tok})
+        urllib.request.urlopen(req).read()
+        print("created work item for", name)
+    PY
+  displayName: Create Boards bugs
+  env:
+    OUT: $(Build.ArtifactStagingDirectory)
+    ORG: $(System.CollectionUri)
+    PROJ: $(System.TeamProject)
+    TOKEN: $(System.AccessToken)
+- publish: $(Build.ArtifactStagingDirectory)
+  artifact: dependency-audit

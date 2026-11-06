@@ -1,0 +1,37 @@
+name: dev-shutdown-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 18 * * 1-5'
+  displayName: Weekday evening shutdown
+  branches: { include: [main] }
+  always: true
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage]
+
+jobs:
+- ${{ each env in parameters.environments }}:
+  - job: stop_${{ env }}
+    pool: { vmImage: ubuntu-latest }
+    variables:
+    - group: vg-${{ env }}
+    steps:
+    - task: AzureCLI@2
+      displayName: Stop compute in ${{ env }}
+      inputs:
+        azureSubscription: sc-azure-${{ env }}
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -uo pipefail
+          az aks stop -g $(rgName) -n $(aksName) --no-wait || true
+          for g in $(az container list -g $(rgName) --query "[?tags.shutdown=='true'].name" -o tsv); do
+            az container stop -g $(rgName) -n "$g" || true
+          done
+          for v in $(az vm list -g $(rgName) --query "[?tags.shutdown=='true'].name" -o tsv); do
+            az vm deallocate -g $(rgName) -n "$v" --no-wait || true
+          done
+          az appservice plan update -g $(rgName) -n plan-${{ env }} --sku B1 || true

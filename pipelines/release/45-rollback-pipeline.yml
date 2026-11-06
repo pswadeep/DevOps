@@ -1,0 +1,56 @@
+name: rollback-$(Date:yyyyMMdd)$(Rev:.r)
+trigger: none
+pr: none
+
+parameters:
+- name: envName
+  type: string
+  default: prod
+  values: [dev, stage, prod]
+- name: targetBuildId
+  displayName: Known-good build ID (image tag)
+  type: string
+- name: mode
+  type: string
+  default: helm-rollback
+  values: [helm-rollback, redeploy-tag]
+
+variables:
+- group: vg-shared
+- group: vg-${{ parameters.envName }}
+
+stages:
+- stage: rollback
+  jobs:
+  - deployment: rollback
+    environment: ${{ parameters.envName }}
+    pool: { vmImage: ubuntu-latest }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - ${{ if eq(parameters.mode, 'helm-rollback') }}:
+            - template: ../../templates/steps/aks-run.yml
+              parameters:
+                serviceConnection: sc-azure-${{ parameters.envName }}
+                resourceGroup: $(rgName)
+                cluster: $(aksName)
+                displayName: Helm rollback
+                script: |
+                  helm history orders-api -n orders --max 5
+                  helm rollback orders-api --namespace orders --wait --timeout 5m
+          - ${{ else }}:
+            - template: ../../templates/steps/aks-run.yml
+              parameters:
+                serviceConnection: sc-azure-${{ parameters.envName }}
+                resourceGroup: $(rgName)
+                cluster: $(aksName)
+                displayName: Redeploy image tag
+                script: |
+                  helm upgrade --install orders-api k8s/helm/orders-api --namespace orders \
+                    -f k8s/helm/orders-api/values-${{ parameters.envName }}.yaml \
+                    --set image.repository=$(acrLoginServer)/orders-api --set image.tag=${{ parameters.targetBuildId }} --atomic --timeout 5m
+          - template: ../../templates/steps/smoke-test.yml
+            parameters:
+              url: $(apiUrl)/health

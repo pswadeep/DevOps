@@ -1,0 +1,43 @@
+name: api-apim-$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches: { include: [main] }
+  paths: { include: [apps/orders-api/openapi/**] }
+pr: none
+
+parameters:
+- name: environments
+  type: object
+  default: [dev, stage, prod]
+
+stages:
+- stage: build
+  jobs:
+  - job: lint
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - bash: npx --yes @stoplight/spectral-cli lint apps/orders-api/openapi/openapi.yaml --fail-severity error
+      displayName: Lint OpenAPI
+    - publish: apps/orders-api/openapi
+      artifact: drop
+
+- ${{ each env in parameters.environments }}:
+  - template: ../../templates/stages/deploy-env.yml
+    parameters:
+      envName: ${{ env }}
+      steps:
+      - task: AzureCLI@2
+        displayName: Import API and apply policy
+        inputs:
+          azureSubscription: sc-azure-${{ env }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euo pipefail
+            SUB=$(az account show --query id -o tsv)
+            az apim api import -g $(rgName) --service-name $(apimName) \
+              --api-id orders-v2 --path orders --api-version v2 --api-version-set-id orders-vs \
+              --specification-format OpenApi --specification-path "$(Pipeline.Workspace)/drop/openapi.yaml" \
+              --service-url $(apiUrl) --subscription-required true
+            az rest --method put \
+              --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/$(rgName)/providers/Microsoft.ApiManagement/service/$(apimName)/apis/orders-v2/policies/policy?api-version=2022-08-01" \
+              --body @apps/orders-api/apim-policy.json

@@ -1,0 +1,31 @@
+name: sql-restore-test-$(Date:yyyyMMdd)
+trigger: none
+pr: none
+schedules:
+- cron: '0 23 1 * *'
+  displayName: Monthly restore test
+  branches: { include: [main] }
+  always: true
+
+variables:
+- group: vg-prod
+
+pool: { vmImage: ubuntu-latest }
+
+steps:
+- task: AzureCLI@2
+  displayName: Point-in-time restore, verify, drop
+  inputs:
+    azureSubscription: sc-azure-prod
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      set -euo pipefail
+      START=$(date +%s)
+      SCRATCH=restoretest-$(date +%Y%m%d)
+      PIT=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
+      az sql db restore -g $(rgName) -s $(sqlServer) -n $(sqlDb) --dest-name "$SCRATCH" --time "$PIT"
+      TOKEN=$(az account get-access-token --resource https://database.windows.net/ --query accessToken -o tsv)
+      echo "restored $SCRATCH in $(( $(date +%s) - START )) seconds"
+      az sql db show -g $(rgName) -s $(sqlServer) -n "$SCRATCH" --query "{status:status,sizeBytes:maxSizeBytes}" -o table
+      az sql db delete -g $(rgName) -s $(sqlServer) -n "$SCRATCH" --yes
